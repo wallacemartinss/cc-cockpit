@@ -41,16 +41,23 @@ from .stats import summary  # noqa: E402
 APP_ID = "cc-cockpit"
 
 
-def _gaugebar(pct: float | None, width: int = 14) -> str:
+# Solid blocks keep a single advance width in the panel font; the parallelogram
+# pair (U+25B0/25B1) does not and comes out slanted and uneven.
+BAR_STYLES = {
+    "blocks": ("█", "░"),
+    "dots": ("●", "○"),
+    "emoji": ("🟩", "⬛"),
+}
+
+
+def _bar(pct: float | None, width: int, style: str, state: str = "ok") -> str:
+    full, empty = BAR_STYLES.get(style, BAR_STYLES["blocks"])
+    if style == "emoji":
+        full = {"ok": "🟩", "warn": "🟨", "crit": "🟥", "idle": "⬛"}.get(state, "🟩")
     if pct is None:
-        return "▱" * width
+        return empty * width
     fill = int(round(min(pct, 100) / 100 * width))
-    return "▰" * fill + "▱" * (width - fill)
-
-
-def _minibar(frac: float, width: int = 6) -> str:
-    fill = max(1, int(round(frac * width)))
-    return "▰" * fill + "▱" * (width - fill)
+    return full * fill + empty * (width - fill)
 
 
 class Tray:
@@ -138,79 +145,80 @@ class Tray:
             self.menu.show_all()
             return
 
+        style = self.cfg.get("menu_bar_style", "blocks")
+        width = 10 if style == "emoji" else 18
         th = s["thresholds"]
         b, w, tot = s["block"], s["week"], s["totals"]
 
-        # rate-limit block
-        pct = b.get("pct") if b["active"] else None
-        state = icon.state_for(pct, th["warn"], th["critical"])
-        head = t("block_of", h=f"{s['block_hours']:.0f}")
-        if pct is not None:
-            head += f" · {pct:.0f}%"
-        self._row(head, icon.dot(state, 16, pct if pct is not None else 0))
-        if b["active"]:
-            self._row(f"{_gaugebar(pct)}  {_money(b['usd'])}")
-            self._row(" · ".join((
-                t("resets_in", d=_dur(b["remaining_s"])),
-                t("pace", v=_money(b["burn_usd_per_h"])),
-                t("projection", v=_money(b["projected_usd"])),
-            )))
-            if b.get("eta_limit_s"):
-                self._row(t("ceiling_eta", d=_dur(b["eta_limit_s"])))
-        else:
-            self._row(t("no_activity"))
+        # --- the two limit windows, each as a headline plus one dense line ---
+        for info, title in ((b, t("block_of", h=f"{s['block_hours']:.0f}")),
+                            (w, t("week_window") if w.get("window_source") in ("official", "anchored")
+                                else t("days7"))):
+            pct = info.get("pct")
+            state = icon.state_for(pct, th["warn"], th["critical"])
+            head = f"{title}   {pct:.0f}%" if pct is not None else title
+            self._row(head, icon.dot(state, 22, pct if pct is not None else 0))
+            self._row(f"{_bar(pct, width, style, state)}   {_money(info['usd'])}")
+            tail = []
+            if info.get("remaining_s"):
+                tail.append(t("resets_in", d=_dur(info["remaining_s"])))
+            if info is b and b["active"]:
+                tail.append(t("pace", v=_money(b["burn_usd_per_h"])))
+                tail.append(t("projection", v=_money(b["projected_usd"])))
+            else:
+                tail.append(_toks(info["tokens"]))
+            self._row("   " + "  ·  ".join(tail))
+            self._sep()
 
-        # rolling week
+        # --- day, month, cache ---
+        self._row(f"{t('today')}   {_money(tot['today']['usd'])}   "
+                  f"{_toks(tot['today']['tokens'])}   {tot['today']['requests']} req",
+                  icon.dot("idle", 22))
+        self._row(f"{t('month')}   {_money(tot['month']['usd'])}   "
+                  + t("cache_hit_7d", p=f"{tot['last_7d']['cache_hit_pct']:.0f}"),
+                  icon.dot("idle", 22))
         self._sep()
-        wp = w.get("pct")
-        wstate = icon.state_for(wp, th["warn"], th["critical"])
-        wtitle = t("week_window") if w.get("window_source") == "anchored" else t("days7")
-        self._row(wtitle + (f" · {wp:.0f}%" if wp is not None else ""),
-                  icon.dot(wstate, 16, wp if wp is not None else 0))
-        self._row(f"{_gaugebar(wp)}  {_money(w['usd'])} · {_toks(w['tokens'])}")
-        if w.get("remaining_s"):
-            self._row(t("resets_in", d=_dur(w["remaining_s"])))
 
-        # day and month
-        self._sep()
-        self._row(f"{t('today')} · {_money(tot['today']['usd'])}", icon.dot("idle"))
-        self._row(t("tokens_requests", tok=_toks(tot["today"]["tokens"]),
-                    n=tot["today"]["requests"]))
-        self._row(f"{t('month')} · {_money(tot['month']['usd'])}", icon.dot("idle"))
-        self._row(t("cache_hit_7d", p=f"{tot['last_7d']['cache_hit_pct']:.0f}"))
-
-        # live sessions
-        self._sep()
+        # --- live sessions, now with the context window from the statusline ---
         if not s["sessions"]:
-            self._row(t("no_sessions"), icon.dot("idle"))
+            self._row(t("no_sessions"), icon.dot("idle", 22))
         for x in s["sessions"]:
             busy = x["status"] == "busy"
-            item = Gtk.ImageMenuItem.new_with_label(
-                f"{x['name']} · {_money(x['usage']['usd'])} · {_toks(x['usage']['tokens'])}")
-            item.set_image(Gtk.Image.new_from_file(icon.dot("ok" if busy else "idle")))
+            ctx = (x.get("context") or {}).get("context_pct")
+            bits = [x["name"], _money(x["usage"]["usd"])]
+            if ctx is not None:
+                bits.append(f"ctx {ctx:.0f}%")
+            elif not busy:
+                bits.append(t("idle_for", d=_dur(x["idle_s"])))
+            item = Gtk.ImageMenuItem.new_with_label("   ".join(bits))
+            item.set_image(Gtk.Image.new_from_file(
+                icon.dot("ok" if busy else "idle", 22, 100 if busy else None)))
             item.set_always_show_image(True)
             inner = Gtk.Menu()
             state_line = t("working") if busy else t("idle_for", d=_dur(x["idle_s"]))
-            for line in (
+            lines = [
                 x["cwd"],
                 f"{state_line} · {t('open_for', d=_dur(x['uptime_s']))}",
                 t("requests_tokens", n=x["usage"]["requests"], tok=_toks(x["usage"]["tokens"])),
                 t("pid_line", pid=x["pid"], mb=f"{x['rss_mb']:.0f}", version=x["version"]),
-            ):
+            ]
+            if ctx is not None:
+                lines.insert(2, f"{_bar(ctx, width, style)}   ctx {ctx:.0f}%")
+            for line in lines:
                 sub_item = Gtk.MenuItem(label=line)
                 sub_item.set_sensitive(False)
                 inner.append(sub_item)
             item.set_submenu(inner)
             self.menu.append(item)
 
-        # today's projects
+        # --- today's projects ---
         if s["projects_today"]:
             self._sep()
             top = s["projects_today"][:5]
             biggest = max(p["usd"] for p in top) or 1
-            self._row(t("projects_today"), icon.dot("idle"))
             for p in top:
-                self._row(f"{_minibar(p['usd'] / biggest)} {p['label'][:24]} · {_money(p['usd'])}")
+                self._row(f"{_bar(p['usd'] / biggest * 100, 6, style)}   "
+                          f"{p['label'][:22]}   {_money(p['usd'])}")
 
         self._sep()
         self._actions()

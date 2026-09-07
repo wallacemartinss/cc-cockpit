@@ -56,6 +56,7 @@ cc-cockpit --lang es report
   "block_hours": 5,
   "limits": { "block_usd": null, "week_usd": null },  // null = auto-calibrate
   "tray_metric": "block",        // block | week | today | none
+  "menu_bar_style": "blocks",    // blocks | dots | emoji (emoji is the colourful one)
   "tray_show_cost": true,
   "refresh_seconds": 20,
   "plan_monthly_usd": null,      // e.g. 200 -> shows how many times the plan paid for itself

@@ -18,6 +18,8 @@ DEFAULTS: dict = {
     "limits": {"block_usd": None, "week_usd": None},
     # what shows next to the icon: block | week | today | none
     "tray_metric": "block",
+    # menu bar characters: blocks | dots | emoji (emoji is the colourful one)
+    "menu_bar_style": "blocks",
     "tray_show_cost": True,
     "refresh_seconds": 20,
     # what the plan costs per month - only used to show how much it returns
