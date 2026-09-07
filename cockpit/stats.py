@@ -6,7 +6,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from . import config, i18n
+from . import calibration, config, i18n
 from .collector import Event, refresh
 from .sessions import live_sessions
 
@@ -73,9 +73,13 @@ def _day_bounds(offset_days: int = 0) -> tuple[float, float]:
 
 
 def build_blocks(events: list[Event], block_hours: float) -> list[dict]:
-    """Rebuilds the rate-limit windows: a block starts at the top of the hour
-    of its first request and lasts block_hours; a silence longer than the
-    window opens the next one."""
+    """Rebuilds the rate-limit windows: a block starts at the exact timestamp of
+    its first request and lasts block_hours; a silence longer than the window
+    opens the next one.
+
+    The start is NOT rounded down to the hour. Checked against what Claude Code
+    itself reports: a first request at 08:46:33 resets at 13:46, not 13:00.
+    """
     span = block_hours * HOUR
     blocks: list[dict] = []
     cur: Bucket | None = None
@@ -85,7 +89,7 @@ def build_blocks(events: list[Event], block_hours: float) -> list[dict]:
         if cur is None or e.t - start >= span or e.t - last >= span:
             if cur is not None:
                 blocks.append({"start": start, "end": start + span, "bucket": cur})
-            start = float(int(e.t // HOUR) * HOUR)
+            start = e.t
             cur = Bucket()
         cur.add(e)
         last = e.t
@@ -186,16 +190,24 @@ def summary(events: list[Event] | None = None, cfg: dict | None = None) -> dict:
         active = blocks[-1]
     closed = [b for b in blocks if b is not active]
 
-    # ceilings: manual config, otherwise the highest value ever observed
-    lim_block = cfg["limits"].get("block_usd")
-    if not lim_block and closed:
-        lim_block = max(b["bucket"].usd for b in closed)
-    lim_week = cfg["limits"].get("week_usd")
+    # ceilings, in order of trust: manual config > calibration against the
+    # percentage Claude Code reports > the largest value ever observed
+    lim_block, src_block = cfg["limits"].get("block_usd"), "manual"
+    if not lim_block:
+        lim_block, src_block = calibration.ceiling("block"), "calibrated"
+    if not lim_block:
+        lim_block = max((b["bucket"].usd for b in closed), default=0.0)
+        src_block = "peak"
+
+    lim_week, src_week = cfg["limits"].get("week_usd"), "manual"
+    if not lim_week:
+        lim_week, src_week = calibration.ceiling("week"), "calibrated"
     if not lim_week:
         weeks: dict[str, float] = defaultdict(float)
         for e in events:
             weeks[datetime.fromtimestamp(e.t).astimezone().strftime("%G-W%V")] += e.c
         lim_week = max(weeks.values(), default=0.0)
+        src_week = "peak"
 
     if active:
         b = active["bucket"]
@@ -213,6 +225,7 @@ def summary(events: list[Event] | None = None, cfg: dict | None = None) -> dict:
             "projected_usd": round(b.usd + burn * (remaining / HOUR), 2),
             **b.as_dict(),
             **_gauge(b.usd, lim_block),
+            "limit_source": src_block,
         }
         if lim_block and burn > 0:
             headroom = max(lim_block - b.usd, 0.0)
@@ -223,12 +236,13 @@ def summary(events: list[Event] | None = None, cfg: dict | None = None) -> dict:
         nxt = Bucket()
         block_info = {"active": False, "start": None, "end": None, "remaining_s": 0,
                       "burn_usd_per_h": 0.0, "burn_tok_per_min": 0.0, "projected_usd": 0.0,
-                      "eta_limit_s": None, **nxt.as_dict(), **_gauge(0, lim_block)}
+                      "eta_limit_s": None, **nxt.as_dict(), **_gauge(0, lim_block),
+                      "limit_source": src_block}
 
     lim_day = max((b.usd for d, b in daily.items() if d != datetime.now().astimezone().strftime("%Y-%m-%d")), default=0.0)
 
     week = totals["last_7d"]
-    week_info = {**week.as_dict(), **_gauge(week.usd, lim_week)}
+    week_info = {**week.as_dict(), **_gauge(week.usd, lim_week), "limit_source": src_week}
 
     live = live_sessions()
     for s in live:

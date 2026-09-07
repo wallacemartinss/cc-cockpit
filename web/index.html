@@ -217,7 +217,8 @@ async function tick(){
       ${ring(d.pct, color(d.pct, th))}
       <div><div class="num">${money(d.usd)}<span class="muted" style="font-size:13px;font-weight:400">${local(d.usd)}</span></div>
         <div class="cap">${toks(d.tokens)} tokens · ${esc(cap)}</div>
-        ${d.limit?`<div class="cap">${esc(t('reference_ceiling',{v:money(d.limit)}))}</div>`:''}
+        ${d.limit?`<div class="cap">${esc(t('reference_ceiling',{v:money(d.limit)}))}${
+          d.limit_source?' · '+esc(t('src_'+d.limit_source)):''}</div>`:''}
       </div></div></div>`).join('');
 
   $('#kpis').innerHTML = [

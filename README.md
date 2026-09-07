@@ -13,7 +13,7 @@ bundled — and can be pinned in the config file or with `--lang`.
 
 | | |
 |---|---|
-| **5h block** | how much the current rate-limit window has consumed, time to reset, hourly pace, projection to the end of the block, and how long until the reference ceiling |
+| **5h block** | how much the current rate-limit window has consumed, time to reset, hourly pace, projection to the end of the block, and how long until the reference ceiling. The window starts at the exact timestamp of its first request — not rounded to the hour — which is what makes the reset match what the CLI reports |
 | **7 days / today / month** | rolling totals, as a percentage of your own historical peak |
 | **Open sessions** | every live CLI instance: name, project, `busy`/`idle`, uptime, RAM, pid, and what that session has consumed |
 | **Projects** | ranked by consumption across the whole history |
@@ -42,6 +42,7 @@ cc-cockpit serve --open    # dashboard only (http://127.0.0.1:8765)
 cc-cockpit json            # everything as JSON, for scripting
 cc-cockpit collect         # ingest new transcripts and exit
 cc-cockpit config          # config path and contents
+cc-cockpit calibrate 21    # teach it the real ceiling (see below)
 cc-cockpit --lang es report
 ```
 
@@ -66,13 +67,29 @@ cc-cockpit --lang es report
 }
 ```
 
-**About the ceilings.** Anthropic does not publish the plan's exact limit in
-tokens, and it appears nowhere on disk. With `limits` set to `null`, cc-cockpit
-uses **your largest recorded block and week** as the reference — so the
-percentage answers "is this block heavy compared to my worst one?". Once you
-learn your real ceiling (for instance by noting the consumption when the CLI
-tells you the limit was reached), put the value in `limits` and the percentage
-becomes absolute.
+## Calibrating against the real limit
+
+Anthropic does not publish the plan limit, and it is nowhere on disk — but the
+CLI does show a percentage (`/usage`, or the plan panel). Tell cc-cockpit that
+number and it derives the ceiling:
+
+```bash
+cc-cockpit calibrate 21              # "21% used" in the current 5h window
+cc-cockpit calibrate 63 --window week
+cc-cockpit calibrate                 # show the samples and the implied ceiling
+cc-cockpit calibrate --reset
+```
+
+Each sample stores `consumption ÷ percentage`; the ceiling is the median of the
+samples, so a couple of readings absorb the delay between seeing the number and
+typing it. Ceilings are picked in order of trust: `limits` in the config (set by
+you) → calibration → your historical peak. The dashboard says which one is in
+use.
+
+The implied ceiling holds while your model mix stays roughly the same, since the
+weighting behind Anthropic's percentage is not documented. Recalibrate after a
+plan change — and note that promos ("+50% weekly limits" and the like) move the
+weekly ceiling while they last.
 
 ## How it works
 
@@ -100,7 +117,8 @@ becomes absolute.
 
 ## Honest limitations
 
-- While `limits` is `null`, the plan percentage is relative to your own history.
+- Without calibration and without `limits`, the percentage is relative to your
+  own history, not to the real plan limit.
 - Models released after this version fall back to their family price (`opus`,
   `sonnet`, `haiku`, `fable`) until they are added to `pricing.py`.
 - `<synthetic>` rows are responses the CLI generates locally: they show up in
