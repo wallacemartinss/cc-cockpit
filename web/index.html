@@ -265,7 +265,7 @@ async function tick(){
 
   const mtot = s.models.reduce((a,m)=>a+m.usd,0)||1;
   $('#models').innerHTML = `<tr><th>${esc(t('th_model'))}</th><th class="r">${esc(t('th_req'))}</th><th class="r">USD</th></tr>` +
-    s.models.map(m=>`<tr><td>${esc(m.model)}</td><td class="r mono muted">${nf.format(m.requests)}</td>
+    s.models.map(m=>`<tr><td>${esc(m.model)}</td><td class="r mono muted">${nf().format(m.requests)}</td>
       <td class="r mono">${money(m.usd)} <span class="muted">${(m.usd/mtot*100).toFixed(0)}%</span></td></tr>`).join('');
 
   $('#tokmix').innerHTML = stacked(tt.last_7d);
@@ -273,14 +273,22 @@ async function tick(){
   const ef = Object.entries(s.efforts);
   const eftot = ef.reduce((a,[,v])=>a+v,0)||1;
   $('#misc').innerHTML = ef.map(([k,v])=>`<div style="display:flex;font-size:13px;padding:3px 0">
-      <span>${esc(k)}</span><span class="right mono">${nf.format(v)} · ${(v/eftot*100).toFixed(0)}%</span></div>`).join('')
+      <span>${esc(k)}</span><span class="right mono">${nf().format(v)} · ${(v/eftot*100).toFixed(0)}%</span></div>`).join('')
     + `<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line);font-size:13px">
        ${esc(t('subagents', {usd: money(s.subagents.usd), n: nf().format(s.subagents.requests)}))}</div>`;
 
   $('#foot').textContent = t('footer',
     {n: nf().format(tt.all.requests), tok: toks(tt.all.tokens), usd: money(tt.all.usd)});
 }
-tick(); setInterval(tick, 20000);
+async function safeTick(){
+  try { await tick(); }
+  catch (err) {
+    // a silent throw used to leave the cards below it blank with no clue why
+    console.error('[cc-cockpit]', err);
+    $('#foot').textContent = 'render error: ' + err.message;
+  }
+}
+safeTick(); setInterval(safeTick, 20000);
 </script>
 </body>
 </html>
