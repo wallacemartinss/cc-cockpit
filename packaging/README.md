@@ -30,8 +30,14 @@ cp packaging/PKGBUILD packaging/.SRCINFO aur/
 cd aur && git commit -am "cc-cockpit 0.2.0" && git push
 ```
 
-Regenerate `.SRCINFO` with `makepkg --printsrcinfo > .SRCINFO` whenever the
-`PKGBUILD` changes; the copy here is kept in sync by hand so the AUR upload is
-a copy, not a rewrite.
+After tagging, refresh the checksum from the published tarball:
+
+```bash
+curl -sL https://github.com/wallacemartinss/cc-cockpit/archive/refs/tags/vX.Y.Z.tar.gz | sha256sum
+```
+
+and put it in both `PKGBUILD` and `.SRCINFO`. Regenerate `.SRCINFO` with
+`makepkg --printsrcinfo > .SRCINFO` whenever the `PKGBUILD` changes; the copy
+here is kept in sync by hand so the AUR upload is a copy, not a rewrite.
 
 Check the build before pushing: `makepkg -si` in a clean directory.
