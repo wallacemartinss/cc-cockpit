@@ -1,7 +1,6 @@
 """GNOME tray indicator."""
 from __future__ import annotations
 
-import subprocess
 import threading
 import webbrowser
 
@@ -32,7 +31,6 @@ else:
     from gi.repository import AppIndicator3 as AppIndicator  # noqa: E402
 
 from . import config, icon, server  # noqa: E402
-from .collector import DATA_DIR  # noqa: E402
 from .i18n import duration as _dur  # noqa: E402
 from .i18n import money as _money  # noqa: E402
 from .i18n import t  # noqa: E402
@@ -67,6 +65,8 @@ class Tray:
         self.cfg = config.ensure()
         use_language(self.cfg.get("language"))
         self._rebuilding = False
+        self.prefs = None
+        self.timer = None
         self.seq = 0
         self.data: dict | None = None
         self.ind = AppIndicator.Indicator.new(
@@ -85,7 +85,8 @@ class Tray:
         self.url = f"http://127.0.0.1:{port}/"
 
         self.refresh()
-        GLib.timeout_add_seconds(int(self.cfg.get("refresh_seconds") or 20), self._tick)
+        self.interval = int(self.cfg.get("refresh_seconds") or 20)
+        self.timer = GLib.timeout_add_seconds(self.interval, self._tick)
 
     # ---------- cycle ----------
     def _tick(self) -> bool:
@@ -142,6 +143,8 @@ class Tray:
             self._fill_menu(s)
         finally:
             self._rebuilding = False
+        self.prefs = None
+        self.timer = None
 
     def _fill_menu(self, s: dict) -> None:
         for child in self.menu.get_children():
@@ -238,69 +241,31 @@ class Tray:
         self._action(t("open_dashboard"), lambda *_: webbrowser.open(self.url))
         self._action(t("refresh_now"), self.refresh)
 
-        settings = Gtk.MenuItem(label=t("settings"))
-        settings.set_submenu(self._settings_menu())
-        self.menu.append(settings)
+        self._action(t("settings"), self._open_preferences)
 
         self._action(t("quit"), lambda *_: Gtk.main_quit())
 
     # ---------- settings ----------
-    # GNOME's appindicator extension renders submenus inline and stops at one
-    # level: a third level never opens. So each option is a single item that
-    # cycles through its values, which also keeps the menu short.
-    def _settings_menu(self) -> Gtk.Menu:
-        menu = Gtk.Menu()
-        block = t("block_of", h=f"{self.cfg.get('block_hours', 5):.0f}")
-        self._cycle(menu, t("panel_shows"), "tray_metric", [
-            ("block", block), ("week", t("days7")),
-            ("today", t("today")), ("none", t("metric_none"))])
-        self._cycle(menu, t("bar_style"), "menu_bar_style", [
-            ("blocks", t("style_blocks")), ("dots", t("style_dots")),
-            ("emoji", t("style_emoji"))])
-        self._cycle(menu, t("language_label"), "language", [
-            ("auto", t("auto")), ("en", "English"),
-            ("pt", "Português"), ("es", "Español")])
-
-        show_cost = Gtk.CheckMenuItem(label=t("show_cost"))
-        show_cost.set_active(bool(self.cfg.get("tray_show_cost", True)))
-        show_cost.connect("toggled", lambda item: self._apply_setting(
-            "tray_show_cost", item.get_active()))
-        menu.append(show_cost)
-
-        menu.append(Gtk.SeparatorMenuItem())
-        for label, target in ((t("open_config"), config.CONFIG_FILE), (t("open_data"), DATA_DIR)):
-            item = Gtk.MenuItem(label=label)
-            item.connect("activate", lambda _i, path=target: self._open(path))
-            menu.append(item)
-        return menu
-
-    def _cycle(self, parent: Gtk.Menu, label: str, key: str,
-               options: list[tuple[str, str]]) -> None:
-        values = [value for value, _ in options]
-        texts = dict(options)
-        current = self.cfg.get(key)
-        position = values.index(current) if current in values else 0
-        following = values[(position + 1) % len(values)]
-        item = Gtk.MenuItem(label=f"{label}:  {texts.get(current, current)}   ⟳")
-        item.connect("activate", lambda *_: self._apply_setting(key, following))
-        parent.append(item)
-
-    def _apply_setting(self, key: str, value) -> None:
-        if self._rebuilding or self.cfg.get(key) == value:
+    def _open_preferences(self, *_a) -> None:
+        if self.prefs and self.prefs.get_visible():
+            self.prefs.present()
             return
-        self.cfg[key] = value
-        config.save(self.cfg)
-        if key == "language":
-            use_language(value)
-        self.refresh()
+        from .preferences import Preferences
 
-    @staticmethod
-    def _open(path) -> None:
-        try:
-            subprocess.Popen(["xdg-open", str(path)],
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except OSError:
-            pass
+        self.prefs = Preferences(on_saved=self._settings_saved)
+        self.prefs.show_all()
+        self.prefs.present()
+
+    def _settings_saved(self, cfg: dict) -> None:
+        self.cfg = cfg
+        use_language(cfg.get("language"))
+        seconds = int(cfg.get("refresh_seconds") or 20)
+        if seconds != self.interval:
+            if self.timer:
+                GLib.source_remove(self.timer)
+            self.interval = seconds
+            self.timer = GLib.timeout_add_seconds(seconds, self._tick)
+        self.refresh()
 
     def _row(self, text: str, icon_path: str | None = None) -> None:
         """Informational line. Deliberately left sensitive: an insensitive item
