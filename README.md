@@ -1,5 +1,7 @@
 # cc-cockpit
 
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 A Claude Code usage panel for GNOME: a tray indicator with a consumption ring,
 a local dashboard and a terminal summary.
 
@@ -157,3 +159,9 @@ statusline payload (stdin)      official rate limits + context ├─> cockpit/
   `sonnet`, `haiku`, `fable`) until they are added to `pricing.py`.
 - `<synthetic>` rows are responses the CLI generates locally: they show up in
   the request count and cost nothing.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+Not affiliated with Anthropic.
