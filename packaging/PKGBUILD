@@ -1,6 +1,6 @@
 # Maintainer: Wallace Martins da Silva <wallacemartinss@gmail.com>
 pkgname=cc-cockpit
-pkgver=0.2.0
+pkgver=0.3.0
 pkgrel=1
 pkgdesc="Claude Code usage panel for GNOME: tray indicator, local dashboard and terminal summary"
 arch=('any')
