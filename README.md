@@ -1,97 +1,107 @@
 # cc-cockpit
 
-Painel de uso do Claude Code para o GNOME: indicador na bandeja com anel de
-consumo + dashboard local + resumo no terminal.
+A Claude Code usage panel for GNOME: a tray indicator with a consumption ring,
+a local dashboard and a terminal summary.
 
-Tudo é lido do que o próprio Claude Code já grava em `~/.claude`. Não fala com
-a rede, não lê credenciais, não manda nada para lugar nenhum.
+Everything is read from what Claude Code already writes under `~/.claude`. It
+makes no network calls, reads no credentials and sends nothing anywhere.
 
-## O que ele mostra
+The interface follows your OS language — English, Portuguese and Spanish are
+bundled — and can be pinned in the config file or with `--lang`.
+
+## What it shows
 
 | | |
 |---|---|
-| **Bloco de 5h** | quanto foi consumido na janela de rate limit atual, quanto falta para resetar, ritmo por hora, projeção até o fim do bloco e quanto tempo até bater o teto de referência |
-| **7 dias / hoje / mês** | consumo agregado, com % contra o seu próprio pico histórico |
-| **Sessões abertas** | cada instância viva do CLI: nome, projeto, `busy`/`idle`, uptime, RAM, pid e quanto aquela sessão já consumiu |
-| **Projetos** | ranking por consumo, do histórico inteiro |
-| **Blocos, dias e horas** | séries temporais para ver quando você gasta |
-| **Composição de tokens** | input / output / cache write 5m / cache write 1h / cache read, com taxa de acerto de cache |
-| **Modelos, effort e subagentes** | onde o consumo realmente vai |
+| **5h block** | how much the current rate-limit window has consumed, time to reset, hourly pace, projection to the end of the block, and how long until the reference ceiling |
+| **7 days / today / month** | rolling totals, as a percentage of your own historical peak |
+| **Open sessions** | every live CLI instance: name, project, `busy`/`idle`, uptime, RAM, pid, and what that session has consumed |
+| **Projects** | ranked by consumption across the whole history |
+| **Blocks, days and hours** | time series showing when you actually spend |
+| **Token mix** | input / output / cache write 5m / cache write 1h / cache read, with the cache hit rate |
+| **Models, effort and subagents** | where the consumption really goes |
 
-O consumo é medido em **USD equivalente API**: quanto aquelas mensagens
-custariam pela API avulsa. Em plano Pro/Max nada disso é cobrado — o número
-serve como unidade de peso do consumo e mostra o quanto o plano rende.
+Usage is measured in **API-equivalent USD**: what those messages would cost on
+the pay-as-you-go API. On a Pro/Max plan none of it is billed — the number works
+as a weight unit for consumption and shows how much the plan returns.
 
-## Instalação
+## Install
 
 ```bash
-sudo apt install gir1.2-ayatanaappindicator3-0.1   # só para a bandeja
+sudo apt install gir1.2-ayatanaappindicator3-0.1   # tray only
 ./install.sh
-cc-cockpit          # bandeja + dashboard em background
+cc-cockpit          # tray + dashboard in the background
 ```
 
-O `install.sh` cria `~/.local/bin/cc-cockpit` e registra o autostart do GNOME.
+`install.sh` creates `~/.local/bin/cc-cockpit` and registers the GNOME autostart
+entry.
 
 ```bash
-cc-cockpit report          # resumo no terminal
-cc-cockpit serve --open    # só o dashboard (http://127.0.0.1:8765)
-cc-cockpit json            # tudo em JSON, para script
-cc-cockpit collect         # só incorpora os transcripts novos
-cc-cockpit config          # caminho e conteúdo da configuração
+cc-cockpit report          # terminal summary
+cc-cockpit serve --open    # dashboard only (http://127.0.0.1:8765)
+cc-cockpit json            # everything as JSON, for scripting
+cc-cockpit collect         # ingest new transcripts and exit
+cc-cockpit config          # config path and contents
+cc-cockpit --lang es report
 ```
 
-## Configuração
+## Configuration
 
 `~/.config/cc-cockpit/config.json`:
 
 ```jsonc
 {
+  "language": "auto",            // auto (follows the OS) | en | pt | es
   "block_hours": 5,
-  "limits": { "block_usd": null, "week_usd": null },  // null = auto-calibra
+  "limits": { "block_usd": null, "week_usd": null },  // null = auto-calibrate
   "tray_metric": "block",        // block | week | today | none
   "tray_show_cost": true,
   "refresh_seconds": 20,
-  "plan_monthly_usd": null,      // ex.: 200 -> mostra quantas vezes o plano se pagou
+  "plan_monthly_usd": null,      // e.g. 200 -> shows how many times the plan paid for itself
   "plan_name": "",
-  "usd_brl": null,               // ex.: 5.4 -> exibe R$ ao lado do USD
+  "local_currency": null,        // e.g. {"code":"BRL","symbol":"R$","rate":5.4}
   "dashboard_port": 8765,
   "warn_pct": 70,
   "critical_pct": 90
 }
 ```
 
-**Sobre os tetos.** A Anthropic não publica o limite exato do plano em tokens,
-e ele não aparece em lugar nenhum no disco. Com `limits` em `null`, o cc-cockpit
-usa como referência o **seu maior bloco e sua maior semana já registrados** — ou
-seja, o % responde "este bloco está pesado comparado ao meu pior?". Se você
-descobrir seu teto real (por exemplo, anotando o consumo quando o CLI avisar
-que você bateu o limite), coloque o valor em `limits` e o % passa a ser absoluto.
+**About the ceilings.** Anthropic does not publish the plan's exact limit in
+tokens, and it appears nowhere on disk. With `limits` set to `null`, cc-cockpit
+uses **your largest recorded block and week** as the reference — so the
+percentage answers "is this block heavy compared to my worst one?". Once you
+learn your real ceiling (for instance by noting the consumption when the CLI
+tells you the limit was reached), put the value in `limits` and the percentage
+becomes absolute.
 
-## Como funciona
+## How it works
 
 ```
-~/.claude/projects/**/*.jsonl   transcripts (usage por request)
-~/.claude/sessions/*.json       uma entrada por CLI vivo  ─┐
-                                                            ├─> cockpit/
-        ~/.local/share/cc-cockpit/events.ndjson  <──────────┘
+~/.claude/projects/**/*.jsonl   transcripts (usage per request)
+~/.claude/sessions/*.json       one entry per live CLI  ─┐
+                                                          ├─> cockpit/
+      ~/.local/share/cc-cockpit/events.ndjson  <──────────┘
 ```
 
-- `collector.py` lê cada transcript **a partir do último offset**, então o
-  refresh custa ~30 ms mesmo com 190 MB de histórico.
-- Os eventos vão para um NDJSON próprio. Isso importa: o Claude Code **poda os
-  transcripts em ~30 dias**, e o cc-cockpit passa a guardar o histórico completo
-  a partir da primeira coleta.
-- Dedup por `message.id:requestId`, então retomar sessão não conta duas vezes.
-- `sessions.py` valida cada pid contra `/proc` **e** compara o `starttime`, para
-  não confundir um pid reciclado com uma sessão viva.
-- Preços em `pricing.py`, com cache write 5m a 1,25× e 1h a 2× o input, e cache
-  read a 0,1× (0,025× no Fable 5.1). O transcript separa os dois TTLs de cache
-  write — o cálculo usa essa separação em vez de assumir tudo em 5m.
+- `collector.py` reads each transcript **from the last offset**, so a refresh
+  costs ~30 ms even with 190 MB of history.
+- Events land in a dedicated NDJSON file. That matters: Claude Code **prunes
+  transcripts after ~30 days**, and from the first collection onward cc-cockpit
+  keeps the full history.
+- Deduplication by `message.id:requestId`, so resuming a session is not counted
+  twice.
+- `sessions.py` validates each pid against `/proc` **and** compares the
+  `starttime`, so a recycled pid is never mistaken for a live session.
+- Prices live in `pricing.py`: cache writes at 1.25× (5m) and 2× (1h) of input,
+  cache reads at 0.1× (0.025× on Fable 5.1). The transcript separates the two
+  cache-write TTLs and the calculation uses that split instead of assuming 5m.
+- `i18n.py` holds one catalogue for all three surfaces, plus locale-aware number
+  and currency formatting.
 
-## Limitações honestas
+## Honest limitations
 
-- O % do plano é relativo ao seu próprio histórico enquanto `limits` for `null`.
-- Modelos lançados depois desta versão caem no preço da família (`opus`,
-  `sonnet`, `haiku`, `fable`) até serem adicionados em `pricing.py`.
-- Linhas `<synthetic>` são respostas geradas localmente pelo CLI: aparecem na
-  contagem de requests e custam zero.
+- While `limits` is `null`, the plan percentage is relative to your own history.
+- Models released after this version fall back to their family price (`opus`,
+  `sonnet`, `haiku`, `fable`) until they are added to `pricing.py`.
+- `<synthetic>` rows are responses the CLI generates locally: they show up in
+  the request count and cost nothing.

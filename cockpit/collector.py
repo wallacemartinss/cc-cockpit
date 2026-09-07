@@ -1,11 +1,11 @@
-"""Coletor incremental dos transcripts do Claude Code.
+"""Incremental collector for Claude Code transcripts.
 
-Le ~/.claude/projects/**/*.jsonl a partir do ultimo offset conhecido e
-grava eventos compactos em ~/.local/share/cc-cockpit/events.ndjson.
+Reads ~/.claude/projects/**/*.jsonl from the last known offset and appends
+compact events to ~/.local/share/cc-cockpit/events.ndjson.
 
-Isso da duas coisas que o transcript sozinho nao da:
-  1. leitura barata (so o delta e lido a cada refresh);
-  2. historico permanente - o Claude Code poda os transcripts em ~30 dias.
+That buys two things the transcripts alone do not give:
+  1. cheap reads - only the delta is parsed on each refresh;
+  2. a permanent history - Claude Code prunes transcripts after ~30 days.
 """
 from __future__ import annotations
 
@@ -29,18 +29,18 @@ SCHEMA = 1
 
 @dataclass(slots=True)
 class Event:
-    k: str      # chave de dedup: message.id:requestId
-    t: float    # epoch segundos (UTC)
-    m: str      # modelo
+    k: str      # dedup key: message.id:requestId
+    t: float    # epoch seconds (UTC)
+    m: str      # model
     i: int      # input tokens
     o: int      # output tokens
     w5: int     # cache write 5m
     w1: int     # cache write 1h
     r: int      # cache read
-    c: float    # custo USD equivalente API
+    c: float    # API-equivalent cost in USD
     s: str      # sessionId
-    p: str      # cwd do projeto
-    x: int      # 1 = sidechain (subagente)
+    p: str      # project cwd
+    x: int      # 1 = sidechain (subagent)
     ef: str     # effort
 
     @classmethod
@@ -62,7 +62,7 @@ class Event:
         w1 = int(cc.get("ephemeral_1h_input_tokens") or 0)
         total_write = int(u.get("cache_creation_input_tokens") or 0)
         if w5 + w1 == 0 and total_write:
-            w5 = total_write  # transcripts antigos sem o detalhamento por TTL
+            w5 = total_write  # older transcripts without the per-TTL split
         model = msg.get("model") or ""
         inp = int(u.get("input_tokens") or 0)
         out = int(u.get("output_tokens") or 0)
@@ -104,7 +104,7 @@ def _save_state(state: dict) -> None:
 
 
 def load_events() -> list[Event]:
-    """Le o historico consolidado."""
+    """Reads the consolidated history."""
     events: list[Event] = []
     if not EVENTS_FILE.exists():
         return events
@@ -122,9 +122,9 @@ def load_events() -> list[Event]:
 
 
 def _read_new_lines(path: Path, offset: int) -> tuple[list[bytes], int]:
-    """Le so o que foi acrescentado, sem consumir linha parcial em escrita."""
+    """Reads only what was appended, never a half-written line."""
     size = path.stat().st_size
-    if size < offset:            # arquivo truncado/rotacionado -> reprocessa
+    if size < offset:            # truncated or rotated -> reprocess
         offset = 0
     if size == offset:
         return [], offset
@@ -133,13 +133,13 @@ def _read_new_lines(path: Path, offset: int) -> tuple[list[bytes], int]:
         chunk = fh.read(size - offset)
     end = chunk.rfind(b"\n")
     if end == -1:
-        return [], offset        # ainda nao ha linha completa
+        return [], offset        # no complete line yet
     complete = chunk[: end + 1]
     return complete.splitlines(), offset + len(complete)
 
 
 def refresh() -> tuple[list[Event], int]:
-    """Incorpora o que ha de novo. Retorna (historico completo, novos)."""
+    """Ingests whatever is new. Returns (full history, new count)."""
     state = _load_state()
     events = load_events()
     seen = {e.k for e in events}
@@ -177,7 +177,7 @@ def refresh() -> tuple[list[Event], int]:
         events.extend(new)
         events.sort(key=lambda e: e.t)
 
-    # esquece arquivos que o Claude Code ja podou
+    # forget files Claude Code has already pruned
     alive = {str(p) for p in PROJECTS_DIR.glob("**/*.jsonl")}
     state["files"] = {k: v for k, v in state["files"].items() if k in alive}
     _save_state(state)

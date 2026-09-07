@@ -1,17 +1,17 @@
-"""Tabela de precos (USD por 1M tokens) e calculo de custo equivalente API.
+"""Price table (USD per 1M tokens) and API-equivalent cost.
 
-Regras de cache (docs Anthropic):
+Cache rules (Anthropic docs):
   cache write 5m  = 1.25x input
   cache write 1h  = 2.00x input
-  cache read      = 0.10x input  (0.025x no Fable 5.1)
+  cache read      = 0.10x input  (0.025x on Fable 5.1)
 
-Assinaturas (Pro/Max) nao cobram por token; o custo aqui e o "valor
-equivalente API" - serve como unidade de peso do consumo e para saber
-quanto o plano esta economizando.
+Subscriptions (Pro/Max) are not billed per token; the cost here is the
+"API-equivalent value" - a weight unit for usage, and a way to see how much
+the plan is saving.
 """
 from __future__ import annotations
 
-# modelo -> (input, output, cache_read_mult)
+# model -> (input, output, cache_read_mult)
 _MODELS: dict[str, tuple[float, float, float]] = {
     "claude-fable-5-1":   (10.0, 50.0, 0.025),
     "claude-mythos-5-1":  (10.0, 50.0, 0.025),
@@ -28,7 +28,7 @@ _MODELS: dict[str, tuple[float, float, float]] = {
 WRITE_5M_MULT = 1.25
 WRITE_1H_MULT = 2.00
 
-# fallback por familia, para modelos novos que ainda nao estao na tabela
+# family fallback, for models released after this table was written
 _FAMILY_FALLBACK = (
     ("fable", "claude-fable-5-1"),
     ("mythos", "claude-mythos-5-1"),
@@ -41,9 +41,9 @@ MILLION = 1_000_000.0
 
 
 def resolve(model: str | None) -> tuple[float, float, float] | None:
-    """Retorna (input, output, cache_read_mult) ou None se nao for cobravel."""
+    """Returns (input, output, cache_read_mult), or None when not billable."""
     if not model or model.startswith("<"):
-        return None  # <synthetic>: respostas locais do proprio CLI
+        return None  # <synthetic>: responses the CLI generates locally
     if model in _MODELS:
         return _MODELS[model]
     for token, ref in _FAMILY_FALLBACK:
@@ -53,7 +53,7 @@ def resolve(model: str | None) -> tuple[float, float, float] | None:
 
 
 def cost(model: str | None, inp: int, out: int, w5m: int, w1h: int, read: int) -> float:
-    """Custo em USD para um request, com os quatro tipos de token separados."""
+    """USD cost for one request, with the four token kinds priced apart."""
     p = resolve(model)
     if p is None:
         return 0.0

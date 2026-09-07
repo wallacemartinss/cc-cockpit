@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Instala o cc-cockpit para o usuario atual (sem tocar em /usr).
+# Installs cc-cockpit for the current user (nothing under /usr).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -20,9 +20,9 @@ except ValueError:
 PY
 
 if [ ${#missing[@]} -gt 0 ]; then
-  echo "!! Faltam pacotes do sistema. Rode:"
+  echo "!! Missing system packages. Run:"
   echo "   sudo apt install ${missing[*]}"
-  echo "   (o dashboard e o 'report' funcionam sem eles; so a bandeja precisa)"
+  echo "   (the dashboard and 'report' work without them; only the tray needs them)"
 fi
 
 mkdir -p "$BIN"
@@ -38,7 +38,7 @@ cat > "$AUTOSTART/cc-cockpit.desktop" <<EOF
 [Desktop Entry]
 Type=Application
 Name=cc-cockpit
-Comment=Uso do Claude Code na bandeja
+Comment=Claude Code usage in the tray
 Exec=$BIN/cc-cockpit tray
 Icon=utilities-system-monitor
 Terminal=false
@@ -48,16 +48,16 @@ X-GNOME-Autostart-Delay=8
 EOF
 echo "==> autostart em $AUTOSTART/cc-cockpit.desktop"
 
-echo "==> primeira coleta"
+echo "==> first collection"
 (cd "$ROOT" && python3 -m cockpit collect)
 
 case ":$PATH:" in
   *":$BIN:"*) ;;
-  *) echo "!! $BIN nao esta no PATH - adicione ao ~/.zshrc" ;;
+  *) echo "!! $BIN is not on PATH - add it to ~/.zshrc" ;;
 esac
 
 echo
-echo "pronto:"
-echo "  cc-cockpit          bandeja (tambem sobe o dashboard)"
-echo "  cc-cockpit serve --open   so o dashboard"
-echo "  cc-cockpit report   resumo no terminal"
+echo "ready:"
+echo "  cc-cockpit          tray (also starts the dashboard)"
+echo "  cc-cockpit serve --open   dashboard only"
+echo "  cc-cockpit report   terminal summary"

@@ -1,4 +1,4 @@
-"""Dashboard local. Serve web/index.html e a API JSON em 127.0.0.1."""
+"""Local dashboard. Serves web/index.html and the JSON API on 127.0.0.1."""
 from __future__ import annotations
 
 import json
@@ -18,7 +18,7 @@ _LOCK = threading.Lock()
 def cached_summary(max_age: float = 5.0) -> dict:
     with _LOCK:
         if _CACHE["data"] is None or time.time() - _CACHE["at"] > max_age:
-            _CACHE["data"] = summary()
+            _CACHE["data"] = summary(cfg=config.load())
             _CACHE["at"] = time.time()
         return _CACHE["data"]
 
@@ -26,7 +26,7 @@ def cached_summary(max_age: float = 5.0) -> dict:
 class Handler(BaseHTTPRequestHandler):
     server_version = "cc-cockpit"
 
-    def log_message(self, *args) -> None:  # silencia o log por request
+    def log_message(self, *args) -> None:  # silence the per-request log
         pass
 
     def _send(self, code: int, body: bytes, ctype: str) -> None:
@@ -47,7 +47,7 @@ class Handler(BaseHTTPRequestHandler):
             f = WEB_DIR / "index.html"
             self._send(200, f.read_bytes(), "text/html; charset=utf-8")
         else:
-            self._send(404, b"nao encontrado", "text/plain; charset=utf-8")
+            self._send(404, b"not found", "text/plain; charset=utf-8")
 
 
 def serve(port: int | None = None, open_browser: bool = False) -> None:
@@ -55,11 +55,11 @@ def serve(port: int | None = None, open_browser: bool = False) -> None:
     port = port or int(cfg.get("dashboard_port") or 8765)
     httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     url = f"http://127.0.0.1:{port}/"
-    print(f"cc-cockpit em {url}  (ctrl-c para sair)")
+    print(f"cc-cockpit at {url}  (ctrl-c to stop)")
     if open_browser:
         import webbrowser
         threading.Timer(0.5, lambda: webbrowser.open(url)).start()
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
-        print("\nencerrado")
+        print("\nstopped")

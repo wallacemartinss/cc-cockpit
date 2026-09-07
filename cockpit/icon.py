@@ -1,4 +1,4 @@
-"""Icone da bandeja: anel de progresso desenhado em tempo real."""
+"""Tray icon: a progress ring drawn on the fly."""
 from __future__ import annotations
 
 import math
@@ -30,10 +30,10 @@ def state_for(pct: float | None, warn: float, crit: float) -> str:
 
 
 def render(pct: float | None, state: str, seq: int) -> str:
-    """Gera o PNG e devolve o nome (sem extensao) para o AppIndicator.
+    """Writes the PNG and returns the name (no extension) for AppIndicator.
 
-    O nome muda a cada render porque o indicador ignora um arquivo cujo
-    nome nao mudou - e o cache dele nao percebe reescrita no mesmo path.
+    The name changes on every render because the indicator ignores a file whose
+    name did not change - its cache does not notice a rewrite at the same path.
     """
     themed = ICON_DIR / "hicolor" / f"{SIZE}x{SIZE}" / "apps"
     themed.mkdir(parents=True, exist_ok=True)
@@ -65,15 +65,15 @@ def render(pct: float | None, state: str, seq: int) -> str:
     ctx.arc(cx, cy, 7.5, 0, 2 * math.pi)
     ctx.fill()
 
-    # o arquivo solto cobre o resolvedor antigo; a copia em hicolor/ cobre o
-    # GTK4, que nao procura mais icone fora de uma estrutura de tema
+    # the loose file covers the old resolver; the hicolor/ copy covers GTK4,
+    # which no longer looks for icons outside a theme structure
     surf.write_to_png(str(ICON_DIR / f"{name}.png"))
     surf.write_to_png(str(themed / f"{name}.png"))
     return name
 
 
 def dot(state: str, size: int = 16, ring: float | None = None) -> str:
-    """Bolinha colorida (ou anel com progresso) para usar dentro do menu."""
+    """Coloured dot (or progress ring) for use inside the menu."""
     ICON_DIR.mkdir(parents=True, exist_ok=True)
     tag = f"{state}-{size}" + (f"-{int(ring)}" if ring is not None else "")
     path = ICON_DIR / f"dot-{tag}.png"

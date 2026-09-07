@@ -1,8 +1,8 @@
-"""Sessoes do Claude Code vivas neste momento.
+"""Claude Code sessions that are alive right now.
 
-~/.claude/sessions/<pid>.json e escrito por cada instancia do CLI. O arquivo
-sobrevive a um kill -9, entao cada entrada e validada contra /proc: o pid tem
-que existir E o starttime tem que bater (evita pid reciclado).
+Each CLI instance writes ~/.claude/sessions/<pid>.json. The file survives a
+kill -9, so every entry is validated against /proc: the pid must exist AND its
+starttime must match, which rules out a recycled pid.
 """
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ def _proc_starttime(pid: int) -> str | None:
         stat = Path(f"/proc/{pid}/stat").read_bytes()
     except OSError:
         return None
-    # o campo 22 (starttime) vem depois do comm entre parenteses, que pode ter espacos
+    # field 22 (starttime) comes after the parenthesised comm, which may hold spaces
     tail = stat[stat.rfind(b")") + 2 :].split()
     try:
         return tail[19].decode()
@@ -63,7 +63,7 @@ def live_sessions() -> list[dict]:
             continue
         want = str(d.get("procStart") or "")
         if want and st != want:
-            continue  # pid reciclado por outro processo
+            continue  # pid recycled by another process
         if "claude" not in _cmdline(pid):
             continue
         started = (d.get("startedAt") or 0) / 1000

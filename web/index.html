@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="pt-BR">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -77,36 +77,36 @@
   <div class="grid g4" style="margin-top:14px" id="kpis"></div>
 
   <div class="card" style="margin-top:14px">
-    <h2>Consumo por dia · equivalente API</h2>
+    <h2 data-t="card_daily"></h2>
     <div id="daily"></div>
   </div>
 
   <div class="grid g2" style="margin-top:14px">
     <div class="card">
-      <h2>Últimas 24 horas</h2>
+      <h2 data-t="card_hourly"></h2>
       <div id="hourly"></div>
     </div>
     <div class="card">
-      <h2>Sessões abertas agora</h2>
+      <h2 data-t="card_sessions"></h2>
       <div class="rows" id="sessions"></div>
     </div>
   </div>
 
   <div class="grid g2" style="margin-top:14px">
     <div class="card">
-      <h2>Projetos · todo o histórico</h2>
+      <h2 data-t="card_projects"></h2>
       <table id="projects"></table>
     </div>
     <div class="card">
-      <h2>Blocos de 5h recentes</h2>
+      <h2 id="h-blocks"></h2>
       <div id="blocks"></div>
     </div>
   </div>
 
   <div class="grid g3" style="margin-top:14px">
-    <div class="card"><h2>Modelos</h2><table id="models"></table></div>
-    <div class="card"><h2>Composição de tokens · 7 dias</h2><div id="tokmix"></div></div>
-    <div class="card"><h2>Effort &amp; subagentes</h2><div id="misc"></div></div>
+    <div class="card"><h2 data-t="card_models"></h2><table id="models"></table></div>
+    <div class="card"><h2 data-t="card_tokenmix"></h2><div id="tokmix"></div></div>
+    <div class="card"><h2 data-t="card_effort"></h2><div id="misc"></div></div>
   </div>
 
   <footer id="foot"></footer>
@@ -114,14 +114,21 @@
 <script>
 const $ = s => document.querySelector(s);
 const esc = v => String(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const nf = new Intl.NumberFormat('pt-BR');
-const money = v => '$' + v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
-let BRL = null;
-const brl = v => BRL ? ' · R$ ' + (v*BRL).toLocaleString('pt-BR',{maximumFractionDigits:0}) : '';
+let LOCALE = 'en-US', T = {}, LOCAL = null;
+const t = (k, p={}) => (T[k]||k).replace(/\{(\w+)\}/g, (_,n) => p[n] ?? '');
+const nf = () => new Intl.NumberFormat(LOCALE);
+// 'symbol' over 'narrowSymbol': outside en-US the narrow form is a bare $,
+// which reads as the local currency rather than USD
+const money = v => new Intl.NumberFormat(LOCALE,
+  {style:'currency', currency:'USD', currencyDisplay:'symbol'}).format(v);
+const local = v => LOCAL
+  ? ' · ' + LOCAL.symbol + ' ' + (v*LOCAL.rate).toLocaleString(LOCALE,{maximumFractionDigits:0})
+  : '';
 function toks(n){
-  if(n>=1e9) return (n/1e9).toFixed(2)+'B';
-  if(n>=1e6) return (n/1e6).toFixed(1)+'M';
-  if(n>=1e3) return (n/1e3).toFixed(0)+'k';
+  const f = (x,d) => x.toLocaleString(LOCALE,{minimumFractionDigits:d,maximumFractionDigits:d});
+  if(n>=1e9) return f(n/1e9,2)+'B';
+  if(n>=1e6) return f(n/1e6,1)+'M';
+  if(n>=1e3) return f(n/1e3,0)+'k';
   return String(n);
 }
 function dur(s){
@@ -149,7 +156,7 @@ function ring(pct, col){
       font-weight="650">${pct==null?'—':Math.round(p)+'%'}</text></svg>`;
 }
 function bars(items, {value, label, height=110, fmt=money, hi=null}){
-  if(!items.length) return '<div class="muted">sem dados</div>';
+  if(!items.length) return `<div class="muted">${esc(t('no_data'))}</div>`;
   const max = Math.max(...items.map(value)) || 1;
   const w = 100/items.length;
   const cells = items.map((it,i)=>{
@@ -185,34 +192,40 @@ function stacked(b){
 
 async function tick(){
   const s = await (await fetch('/api/summary')).json();
-  BRL = s.usd_brl;
+  T = s.i18n.catalog; LOCALE = s.i18n.tag; LOCAL = s.local_currency;
+  document.documentElement.lang = s.i18n.language;
+  document.querySelectorAll('[data-t]').forEach(el => el.textContent = t(el.dataset.t));
+  $('#h-blocks').textContent = t('card_blocks', {h: s.block_hours.toFixed(0)});
   const th = {warn:s.thresholds.warn, critical:s.thresholds.critical};
-  const b = s.block, w = s.week, t = s.totals;
+  const b = s.block, w = s.week, tt = s.totals;
 
   $('#plan').innerHTML = s.plan.monthly_usd
-    ? `plano <b>${s.plan.name||'—'}</b> · rendeu <b>${(s.plan.roi||0)}×</b> este mês`
-    : `equivalente API no mês <b>${money(t.month.usd)}</b>${brl(t.month.usd)}`;
-  $('#live').innerHTML = `<b>${s.sessions.length}</b> sessão(ões) aberta(s)`;
-  $('#upd').textContent = 'atualizado ' + new Date(s.generated_at*1000).toLocaleTimeString('pt-BR');
+    ? esc(t('plan_roi', {name: s.plan.name||'—', roi: s.plan.roi||0}))
+    : `${esc(t('month_equivalent'))} <b>${money(tt.month.usd)}</b>${local(tt.month.usd)}`;
+  $('#live').textContent = t('sessions_open', {n: s.sessions.length});
+  $('#upd').textContent = t('updated',
+    {time: new Date(s.generated_at*1000).toLocaleTimeString(LOCALE)});
 
   $('#gauges').innerHTML = [
-    ['Bloco de '+s.block_hours+'h', b, b.active ? 'reseta em '+dur(b.remaining_s) : 'nenhum bloco ativo'],
-    ['Últimos 7 dias', w, w.requests+' requests'],
-    ['Hoje', s.today_gauge, t.today.requests+' requests · '+t.today.sessions+' sessões'],
+    [t('block_of',{h:s.block_hours.toFixed(0)}), b,
+      b.active ? t('resets_in',{d:dur(b.remaining_s)}) : t('no_activity')],
+    [t('days7'), w, `${nf().format(w.requests)} ${t('requests')}`],
+    [t('today'), s.today_gauge,
+      `${tt.today.requests} ${t('requests')} · ${tt.today.sessions} ${t('sessions')}`],
   ].map(([title,d,cap])=>`
     <div class="card"><h2>${title}</h2><div class="gauge">
       ${ring(d.pct, color(d.pct, th))}
-      <div><div class="num">${money(d.usd)}<span class="muted" style="font-size:13px;font-weight:400">${brl(d.usd)}</span></div>
-        <div class="cap">${toks(d.tokens)} tokens · ${cap}</div>
-        ${d.limit?`<div class="cap">teto de referência ${money(d.limit)}</div>`:''}
+      <div><div class="num">${money(d.usd)}<span class="muted" style="font-size:13px;font-weight:400">${local(d.usd)}</span></div>
+        <div class="cap">${toks(d.tokens)} tokens · ${esc(cap)}</div>
+        ${d.limit?`<div class="cap">${esc(t('reference_ceiling',{v:money(d.limit)}))}</div>`:''}
       </div></div></div>`).join('');
 
   $('#kpis').innerHTML = [
-    [money(b.burn_usd_per_h)+'/h', 'ritmo no bloco atual'],
-    [b.active?money(b.projected_usd):'—', 'projeção até o fim do bloco'],
-    [(b.eta_limit_s!=null && b.active)?dur(b.eta_limit_s):'—', 'até o teto de referência'],
-    [t.last_7d.cache_hit_pct+'%', 'cache hit em 7 dias'],
-  ].map(([v,l])=>`<div class="card kpi"><div class="v mono">${v}</div><div class="l">${l}</div></div>`).join('');
+    [money(b.burn_usd_per_h)+'/h', t('kpi_pace')],
+    [b.active?money(b.projected_usd):'—', t('kpi_projection')],
+    [(b.eta_limit_s!=null && b.active)?dur(b.eta_limit_s):'—', t('kpi_eta')],
+    [tt.last_7d.cache_hit_pct+'%', t('kpi_cache')],
+  ].map(([v,l])=>`<div class="card kpi"><div class="v mono">${v}</div><div class="l">${esc(l)}</div></div>`).join('');
 
   $('#daily').innerHTML = bars(s.daily.slice(-30), {
     value:d=>d.usd, label:d=>d.date.slice(8)+'/'+d.date.slice(5,7),
@@ -231,10 +244,10 @@ async function tick(){
       </div>
       <div class="right"><div class="mono">${money(x.usage.usd)}</div>
         <div class="muted" style="font-size:11.5px">${toks(x.usage.tokens)} · ${dur(x.uptime_s)} · pid ${x.pid}</div></div>
-    </div>`).join('') : '<div class="muted">nenhuma sessão aberta</div>';
+    </div>`).join('') : `<div class="muted">${esc(t('no_sessions'))}</div>`;
 
   const pmax = Math.max(...s.projects.map(p=>p.usd), 1);
-  $('#projects').innerHTML = '<tr><th>projeto</th><th class="r">tokens</th><th class="r">USD</th><th style="width:110px"></th></tr>' +
+  $('#projects').innerHTML = `<tr><th>${esc(t('th_project'))}</th><th class="r">${esc(t('th_tokens'))}</th><th class="r">USD</th><th style="width:110px"></th></tr>` +
     s.projects.slice(0,12).map(p=>`<tr>
       <td title="${esc(p.cwd)}">${esc(p.label)}</td>
       <td class="r mono muted">${toks(p.tokens)}</td>
@@ -248,20 +261,21 @@ async function tick(){
     hi:x=>x.end*1000>Date.now()});
 
   const mtot = s.models.reduce((a,m)=>a+m.usd,0)||1;
-  $('#models').innerHTML = '<tr><th>modelo</th><th class="r">req</th><th class="r">USD</th></tr>' +
+  $('#models').innerHTML = `<tr><th>${esc(t('th_model'))}</th><th class="r">${esc(t('th_req'))}</th><th class="r">USD</th></tr>` +
     s.models.map(m=>`<tr><td>${esc(m.model)}</td><td class="r mono muted">${nf.format(m.requests)}</td>
       <td class="r mono">${money(m.usd)} <span class="muted">${(m.usd/mtot*100).toFixed(0)}%</span></td></tr>`).join('');
 
-  $('#tokmix').innerHTML = stacked(t.last_7d);
+  $('#tokmix').innerHTML = stacked(tt.last_7d);
 
   const ef = Object.entries(s.efforts);
   const eftot = ef.reduce((a,[,v])=>a+v,0)||1;
   $('#misc').innerHTML = ef.map(([k,v])=>`<div style="display:flex;font-size:13px;padding:3px 0">
       <span>${esc(k)}</span><span class="right mono">${nf.format(v)} · ${(v/eftot*100).toFixed(0)}%</span></div>`).join('')
     + `<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line);font-size:13px">
-       subagentes: <b class="mono">${money(s.subagents.usd)}</b> em ${nf.format(s.subagents.requests)} requests</div>`;
+       ${esc(t('subagents', {usd: money(s.subagents.usd), n: nf().format(s.subagents.requests)}))}</div>`;
 
-  $('#foot').textContent = `histórico local: ${nf.format(t.all.requests)} requests · ${toks(t.all.tokens)} tokens · ${money(t.all.usd)} equivalente API`;
+  $('#foot').textContent = t('footer',
+    {n: nf().format(tt.all.requests), tok: toks(tt.all.tokens), usd: money(tt.all.usd)});
 }
 tick(); setInterval(tick, 20000);
 </script>

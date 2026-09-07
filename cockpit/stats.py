@@ -1,4 +1,4 @@
-"""Agregacoes: blocos de 5h, dia, semana, projeto, modelo, sessao."""
+"""Aggregations: 5h blocks, day, week, project, model, session."""
 from __future__ import annotations
 
 import time
@@ -6,7 +6,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from . import config
+from . import config, i18n
 from .collector import Event, refresh
 from .sessions import live_sessions
 
@@ -44,7 +44,7 @@ class Bucket:
 
     @property
     def billable(self) -> int:
-        """Tokens que nao vieram de cache hit - o que realmente 'pesa'."""
+        """Tokens that did not come from a cache hit - the ones that weigh."""
         return self.inp + self.out + self.w5 + self.w1
 
     def as_dict(self) -> dict:
@@ -73,8 +73,9 @@ def _day_bounds(offset_days: int = 0) -> tuple[float, float]:
 
 
 def build_blocks(events: list[Event], block_hours: float) -> list[dict]:
-    """Reconstroi as janelas de rate limit: comeca na hora cheia do primeiro
-    request e dura block_hours; um silencio maior que a janela abre outra."""
+    """Rebuilds the rate-limit windows: a block starts at the top of the hour
+    of its first request and lasts block_hours; a silence longer than the
+    window opens the next one."""
     span = block_hours * HOUR
     blocks: list[dict] = []
     cur: Bucket | None = None
@@ -133,6 +134,7 @@ def _fill_hours(hourly: dict[int, Bucket], now: float) -> list[dict]:
 
 def summary(events: list[Event] | None = None, cfg: dict | None = None) -> dict:
     cfg = cfg or config.load()
+    i18n.use(cfg.get("language"))
     if events is None:
         events, _ = refresh()
     now = time.time()
@@ -184,7 +186,7 @@ def summary(events: list[Event] | None = None, cfg: dict | None = None) -> dict:
         active = blocks[-1]
     closed = [b for b in blocks if b is not active]
 
-    # tetos: config manual, senao o maior valor ja observado
+    # ceilings: manual config, otherwise the highest value ever observed
     lim_block = cfg["limits"].get("block_usd")
     if not lim_block and closed:
         lim_block = max(b["bucket"].usd for b in closed)
@@ -266,6 +268,7 @@ def summary(events: list[Event] | None = None, cfg: dict | None = None) -> dict:
         "subagents": sidechain.as_dict(),
         "sessions": live,
         "plan": {"monthly_usd": plan, "name": cfg.get("plan_name") or "", "value_this_month": round(value, 2), "roi": roi},
-        "usd_brl": cfg.get("usd_brl"),
+        "local_currency": cfg.get("local_currency"),
+        "i18n": {"language": i18n.language(), "tag": i18n.tag(), "catalog": i18n.catalog()},
         "thresholds": {"warn": cfg.get("warn_pct", 70), "critical": cfg.get("critical_pct", 90)},
     }
