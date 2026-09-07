@@ -53,6 +53,29 @@ def save(cfg: dict) -> None:
 
 
 def ensure() -> dict:
-    if not CONFIG_FILE.exists():
-        save(DEFAULTS)
-    return load()
+    """Loads the config, writing any key the file is missing.
+
+    A file written by an older version would otherwise never show the new
+    options, and the file is where people look to discover them.
+    """
+    cfg = load()
+    if not CONFIG_FILE.exists() or set(cfg) - set(_flat(CONFIG_FILE)) or _missing(cfg):
+        save(cfg)
+    return cfg
+
+
+def _flat(path: Path) -> dict:
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def _missing(cfg: dict) -> bool:
+    stored = _flat(CONFIG_FILE)
+    if set(cfg) - set(stored):
+        return True
+    return any(
+        isinstance(v, dict) and set(v) - set(stored.get(k, {}))
+        for k, v in cfg.items()
+    )

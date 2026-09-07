@@ -1,6 +1,7 @@
 """GNOME tray indicator."""
 from __future__ import annotations
 
+import subprocess
 import threading
 import webbrowser
 
@@ -31,6 +32,7 @@ else:
     from gi.repository import AppIndicator3 as AppIndicator  # noqa: E402
 
 from . import config, icon, server  # noqa: E402
+from .collector import DATA_DIR  # noqa: E402
 from .i18n import duration as _dur  # noqa: E402
 from .i18n import money as _money  # noqa: E402
 from .i18n import t  # noqa: E402
@@ -64,6 +66,7 @@ class Tray:
     def __init__(self) -> None:
         self.cfg = config.ensure()
         use_language(self.cfg.get("language"))
+        self._rebuilding = False
         self.seq = 0
         self.data: dict | None = None
         self.ind = AppIndicator.Indicator.new(
@@ -134,6 +137,13 @@ class Tray:
 
     # ---------- menu ----------
     def _build_menu(self, s: dict) -> None:
+        self._rebuilding = True
+        try:
+            self._fill_menu(s)
+        finally:
+            self._rebuilding = False
+
+    def _fill_menu(self, s: dict) -> None:
         for child in self.menu.get_children():
             self.menu.remove(child)
 
@@ -227,7 +237,76 @@ class Tray:
     def _actions(self) -> None:
         self._action(t("open_dashboard"), lambda *_: webbrowser.open(self.url))
         self._action(t("refresh_now"), self.refresh)
+
+        settings = Gtk.MenuItem(label=t("settings"))
+        settings.set_submenu(self._settings_menu())
+        self.menu.append(settings)
+
         self._action(t("quit"), lambda *_: Gtk.main_quit())
+
+    # ---------- settings ----------
+    def _settings_menu(self) -> Gtk.Menu:
+        menu = Gtk.Menu()
+        block = t("block_of", h=f"{self.cfg.get('block_hours', 5):.0f}")
+        self._choice(menu, t("panel_shows"), "tray_metric", [
+            ("block", block), ("week", t("days7")),
+            ("today", t("today")), ("none", t("metric_none"))])
+        self._choice(menu, t("bar_style"), "menu_bar_style", [
+            ("blocks", t("style_blocks")), ("dots", t("style_dots")),
+            ("emoji", t("style_emoji"))])
+        self._choice(menu, t("language_label"), "language", [
+            ("auto", t("auto")), ("en", "English"),
+            ("pt", "Português"), ("es", "Español")])
+
+        show_cost = Gtk.CheckMenuItem(label=t("show_cost"))
+        show_cost.set_active(bool(self.cfg.get("tray_show_cost", True)))
+        show_cost.connect("toggled", lambda item: self._apply_setting(
+            "tray_show_cost", item.get_active()))
+        menu.append(show_cost)
+
+        menu.append(Gtk.SeparatorMenuItem())
+        for label, target in ((t("open_config"), config.CONFIG_FILE), (t("open_data"), DATA_DIR)):
+            item = Gtk.MenuItem(label=label)
+            item.connect("activate", lambda _i, path=target: self._open(path))
+            menu.append(item)
+        return menu
+
+    def _choice(self, parent: Gtk.Menu, label: str, key: str,
+                options: list[tuple[str, str]]) -> None:
+        current = self.cfg.get(key)
+        submenu = Gtk.Menu()
+        for value, text in options:
+            item = Gtk.CheckMenuItem(label=text)
+            item.set_draw_as_radio(True)
+            item.set_active(current == value)
+            item.connect("toggled", self._on_choice, key, value)
+            submenu.append(item)
+        holder = Gtk.MenuItem(label=label)
+        holder.set_submenu(submenu)
+        parent.append(holder)
+
+    def _on_choice(self, item: Gtk.CheckMenuItem, key: str, value: str) -> None:
+        # set_active() during a rebuild also fires "toggled"; ignore those
+        if self._rebuilding or not item.get_active():
+            return
+        self._apply_setting(key, value)
+
+    def _apply_setting(self, key: str, value) -> None:
+        if self.cfg.get(key) == value:
+            return
+        self.cfg[key] = value
+        config.save(self.cfg)
+        if key == "language":
+            use_language(value)
+        self.refresh()
+
+    @staticmethod
+    def _open(path) -> None:
+        try:
+            subprocess.Popen(["xdg-open", str(path)],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError:
+            pass
 
     def _row(self, text: str, icon_path: str | None = None) -> None:
         """Informational line. Deliberately left sensitive: an insensitive item
