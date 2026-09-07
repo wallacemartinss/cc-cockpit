@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cc-cockpit</title>
+<style>
+  :root{
+    --bg:#0e1014; --panel:#161a21; --panel2:#1c212a; --line:#252b36;
+    --fg:#e6e9ef; --muted:#8b94a6; --accent:#d97757; --ok:#4ea87a;
+    --warn:#d9a441; --crit:#d95757; --blue:#5b8dd9;
+    --radius:14px;
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#f5f6f8; --panel:#fff; --panel2:#f0f2f5; --line:#e2e5ea;
+           --fg:#1a1d23; --muted:#69707e; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  a{color:inherit}
+  .wrap{max-width:1240px;margin:0 auto;padding:22px 20px 60px}
+  header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:20px}
+  h1{font-size:19px;margin:0;letter-spacing:-.2px}
+  h1 span{color:var(--accent)}
+  .sub{color:var(--muted);font-size:12.5px}
+  .pill{background:var(--panel);border:1px solid var(--line);border-radius:999px;
+        padding:3px 11px;font-size:12px;color:var(--muted)}
+  .pill b{color:var(--fg);font-weight:600}
+  .grid{display:grid;gap:14px}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  .g2{grid-template-columns:1.35fr 1fr;align-items:start}
+  .g4{grid-template-columns:repeat(4,1fr)}
+  @media(max-width:900px){.g3,.g2,.g4{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px}
+  .card h2{font-size:12px;text-transform:uppercase;letter-spacing:.9px;color:var(--muted);
+           margin:0 0 12px;font-weight:600}
+  .gauge{display:flex;align-items:center;gap:16px}
+  .gauge .num{font-size:26px;font-weight:650;letter-spacing:-.5px}
+  .gauge .cap{color:var(--muted);font-size:12.5px;margin-top:2px}
+  .kpi .v{font-size:22px;font-weight:650;letter-spacing:-.4px}
+  .kpi .l{color:var(--muted);font-size:12px;margin-top:3px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{text-align:left;color:var(--muted);font-weight:500;font-size:11.5px;
+     text-transform:uppercase;letter-spacing:.6px;padding:0 8px 8px 0}
+  td{padding:7px 8px 7px 0;border-top:1px solid var(--line);vertical-align:middle}
+  td.r,th.r{text-align:right}
+  .bar{height:6px;border-radius:4px;background:var(--panel2);overflow:hidden;min-width:60px}
+  .bar>i{display:block;height:100%;background:var(--accent);border-radius:4px}
+  .mono{font-variant-numeric:tabular-nums;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .dot{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:7px}
+  .muted{color:var(--muted)}
+  .tag{font-size:11px;padding:1px 7px;border-radius:5px;background:var(--panel2);color:var(--muted)}
+  .rows{display:flex;flex-direction:column;gap:10px}
+  .sess{display:flex;gap:12px;align-items:center;padding:10px 12px;background:var(--panel2);
+        border-radius:10px;border:1px solid transparent}
+  .sess.busy{border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
+  .sess .nm{font-weight:600}
+  .sess .pth{font-size:12px;color:var(--muted);word-break:break-all}
+  .right{margin-left:auto;text-align:right;white-space:nowrap}
+  svg{display:block;overflow:visible}
+  .lbl{fill:var(--muted);font-size:9.5px}
+  footer{margin-top:26px;color:var(--muted);font-size:12px;text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>cc<span>·</span>cockpit</h1>
+    <span class="pill" id="plan">—</span>
+    <span class="pill" id="live">—</span>
+    <span class="sub" id="upd" style="margin-left:auto"></span>
+  </header>
+
+  <div class="grid g3" id="gauges"></div>
+
+  <div class="grid g4" style="margin-top:14px" id="kpis"></div>
+
+  <div class="card" style="margin-top:14px">
+    <h2>Consumo por dia · equivalente API</h2>
+    <div id="daily"></div>
+  </div>
+
+  <div class="grid g2" style="margin-top:14px">
+    <div class="card">
+      <h2>Últimas 24 horas</h2>
+      <div id="hourly"></div>
+    </div>
+    <div class="card">
+      <h2>Sessões abertas agora</h2>
+      <div class="rows" id="sessions"></div>
+    </div>
+  </div>
+
+  <div class="grid g2" style="margin-top:14px">
+    <div class="card">
+      <h2>Projetos · todo o histórico</h2>
+      <table id="projects"></table>
+    </div>
+    <div class="card">
+      <h2>Blocos de 5h recentes</h2>
+      <div id="blocks"></div>
+    </div>
+  </div>
+
+  <div class="grid g3" style="margin-top:14px">
+    <div class="card"><h2>Modelos</h2><table id="models"></table></div>
+    <div class="card"><h2>Composição de tokens · 7 dias</h2><div id="tokmix"></div></div>
+    <div class="card"><h2>Effort &amp; subagentes</h2><div id="misc"></div></div>
+  </div>
+
+  <footer id="foot"></footer>
+</div>
+<script>
+const $ = s => document.querySelector(s);
+const esc = v => String(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const nf = new Intl.NumberFormat('pt-BR');
+const money = v => '$' + v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+let BRL = null;
+const brl = v => BRL ? ' · R$ ' + (v*BRL).toLocaleString('pt-BR',{maximumFractionDigits:0}) : '';
+function toks(n){
+  if(n>=1e9) return (n/1e9).toFixed(2)+'B';
+  if(n>=1e6) return (n/1e6).toFixed(1)+'M';
+  if(n>=1e3) return (n/1e3).toFixed(0)+'k';
+  return String(n);
+}
+function dur(s){
+  s = Math.max(0, Math.round(s));
+  const d=Math.floor(s/86400), h=Math.floor(s%86400/3600), m=Math.floor(s%3600/60);
+  if(d) return d+'d '+h+'h';
+  if(h) return h+'h '+String(m).padStart(2,'0')+'m';
+  return m+'m';
+}
+function color(pct, th){
+  if(pct==null) return 'var(--blue)';
+  if(pct>=th.critical) return 'var(--crit)';
+  if(pct>=th.warn) return 'var(--warn)';
+  return 'var(--ok)';
+}
+function ring(pct, col){
+  const p = Math.max(0, Math.min(100, pct==null?0:pct));
+  const R=30, C=2*Math.PI*R;
+  return `<svg width="76" height="76" viewBox="0 0 76 76">
+    <circle cx="38" cy="38" r="${R}" fill="none" stroke="var(--panel2)" stroke-width="8"/>
+    <circle cx="38" cy="38" r="${R}" fill="none" stroke="${col}" stroke-width="8"
+      stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${C*(1-p/100)}"
+      transform="rotate(-90 38 38)"/>
+    <text x="38" y="42" text-anchor="middle" fill="var(--fg)" font-size="15"
+      font-weight="650">${pct==null?'—':Math.round(p)+'%'}</text></svg>`;
+}
+function bars(items, {value, label, height=110, fmt=money, hi=null}){
+  if(!items.length) return '<div class="muted">sem dados</div>';
+  const max = Math.max(...items.map(value)) || 1;
+  const w = 100/items.length;
+  const cells = items.map((it,i)=>{
+    const v = value(it), h = Math.max(2, v/max*height);
+    const c = hi && hi(it) ? 'var(--accent)' : 'var(--blue)';
+    return `<div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;
+      align-items:center;gap:5px" title="${label(it)}: ${fmt(v)}">
+      <div style="width:100%;max-width:26px;height:${h}px;background:${c};border-radius:3px 3px 0 0;opacity:.9"></div>
+      </div>`;}).join('');
+  const ticks = items.map((it,i)=>{
+    const show = items.length<=12 || i%Math.ceil(items.length/10)===0;
+    return `<div style="flex:1;text-align:center;font-size:10px;color:var(--muted);
+      white-space:nowrap">${show?label(it):''}</div>`;}).join('');
+  return `<div style="display:flex;align-items:flex-end;gap:3px;height:${height}px">${cells}</div>
+          <div style="display:flex;gap:3px;margin-top:6px">${ticks}</div>`;
+}
+function stacked(b){
+  const parts = [
+    ['cache read', b.cache_read, 'var(--blue)'],
+    ['cache write 1h', b.cache_write_1h, 'var(--accent)'],
+    ['cache write 5m', b.cache_write_5m, '#8a6bd9'],
+    ['output', b.output, 'var(--ok)'],
+    ['input', b.input, 'var(--warn)'],
+  ].filter(p=>p[1]>0);
+  const tot = parts.reduce((a,p)=>a+p[1],0)||1;
+  return `<div style="display:flex;height:26px;border-radius:7px;overflow:hidden;margin-bottom:12px">
+    ${parts.map(p=>`<div style="width:${p[1]/tot*100}%;background:${p[2]}" title="${p[0]}: ${toks(p[1])}"></div>`).join('')}
+   </div>` +
+   parts.map(p=>`<div style="display:flex;align-items:center;font-size:12.5px;padding:3px 0">
+      <span class="dot" style="background:${p[2]}"></span>${p[0]}
+      <span class="right mono">${toks(p[1])} · ${(p[1]/tot*100).toFixed(1)}%</span></div>`).join('');
+}
+
+async function tick(){
+  const s = await (await fetch('/api/summary')).json();
+  BRL = s.usd_brl;
+  const th = {warn:s.thresholds.warn, critical:s.thresholds.critical};
+  const b = s.block, w = s.week, t = s.totals;
+
+  $('#plan').innerHTML = s.plan.monthly_usd
+    ? `plano <b>${s.plan.name||'—'}</b> · rendeu <b>${(s.plan.roi||0)}×</b> este mês`
+    : `equivalente API no mês <b>${money(t.month.usd)}</b>${brl(t.month.usd)}`;
+  $('#live').innerHTML = `<b>${s.sessions.length}</b> sessão(ões) aberta(s)`;
+  $('#upd').textContent = 'atualizado ' + new Date(s.generated_at*1000).toLocaleTimeString('pt-BR');
+
+  $('#gauges').innerHTML = [
+    ['Bloco de '+s.block_hours+'h', b, b.active ? 'reseta em '+dur(b.remaining_s) : 'nenhum bloco ativo'],
+    ['Últimos 7 dias', w, w.requests+' requests'],
+    ['Hoje', s.today_gauge, t.today.requests+' requests · '+t.today.sessions+' sessões'],
+  ].map(([title,d,cap])=>`
+    <div class="card"><h2>${title}</h2><div class="gauge">
+      ${ring(d.pct, color(d.pct, th))}
+      <div><div class="num">${money(d.usd)}<span class="muted" style="font-size:13px;font-weight:400">${brl(d.usd)}</span></div>
+        <div class="cap">${toks(d.tokens)} tokens · ${cap}</div>
+        ${d.limit?`<div class="cap">teto de referência ${money(d.limit)}</div>`:''}
+      </div></div></div>`).join('');
+
+  $('#kpis').innerHTML = [
+    [money(b.burn_usd_per_h)+'/h', 'ritmo no bloco atual'],
+    [b.active?money(b.projected_usd):'—', 'projeção até o fim do bloco'],
+    [(b.eta_limit_s!=null && b.active)?dur(b.eta_limit_s):'—', 'até o teto de referência'],
+    [t.last_7d.cache_hit_pct+'%', 'cache hit em 7 dias'],
+  ].map(([v,l])=>`<div class="card kpi"><div class="v mono">${v}</div><div class="l">${l}</div></div>`).join('');
+
+  $('#daily').innerHTML = bars(s.daily.slice(-30), {
+    value:d=>d.usd, label:d=>d.date.slice(8)+'/'+d.date.slice(5,7),
+    hi:d=>d.date===new Date().toISOString().slice(0,10)});
+
+  $('#hourly').innerHTML = bars(s.hourly_24h, {
+    value:h=>h.usd, height:90,
+    label:h=>String(new Date(h.hour*1000).getHours()).padStart(2,'0')+'h'});
+
+  $('#sessions').innerHTML = s.sessions.length ? s.sessions.map(x=>`
+    <div class="sess ${x.status}">
+      <div style="min-width:0">
+        <div class="nm"><span class="dot" style="background:${x.status==='busy'?'var(--ok)':'var(--muted)'}"></span>${esc(x.name)}
+          <span class="tag">${x.status}</span></div>
+        <div class="pth">${esc(x.cwd)}</div>
+      </div>
+      <div class="right"><div class="mono">${money(x.usage.usd)}</div>
+        <div class="muted" style="font-size:11.5px">${toks(x.usage.tokens)} · ${dur(x.uptime_s)} · pid ${x.pid}</div></div>
+    </div>`).join('') : '<div class="muted">nenhuma sessão aberta</div>';
+
+  const pmax = Math.max(...s.projects.map(p=>p.usd), 1);
+  $('#projects').innerHTML = '<tr><th>projeto</th><th class="r">tokens</th><th class="r">USD</th><th style="width:110px"></th></tr>' +
+    s.projects.slice(0,12).map(p=>`<tr>
+      <td title="${esc(p.cwd)}">${esc(p.label)}</td>
+      <td class="r mono muted">${toks(p.tokens)}</td>
+      <td class="r mono">${money(p.usd)}</td>
+      <td><div class="bar"><i style="width:${p.usd/pmax*100}%"></i></div></td></tr>`).join('');
+
+  $('#blocks').innerHTML = bars(s.blocks.slice(-14), {
+    value:x=>x.usd, height:90,
+    label:x=>{const d=new Date(x.start*1000);
+      return String(d.getDate()).padStart(2,'0')+' '+String(d.getHours()).padStart(2,'0')+'h';},
+    hi:x=>x.end*1000>Date.now()});
+
+  const mtot = s.models.reduce((a,m)=>a+m.usd,0)||1;
+  $('#models').innerHTML = '<tr><th>modelo</th><th class="r">req</th><th class="r">USD</th></tr>' +
+    s.models.map(m=>`<tr><td>${esc(m.model)}</td><td class="r mono muted">${nf.format(m.requests)}</td>
+      <td class="r mono">${money(m.usd)} <span class="muted">${(m.usd/mtot*100).toFixed(0)}%</span></td></tr>`).join('');
+
+  $('#tokmix').innerHTML = stacked(t.last_7d);
+
+  const ef = Object.entries(s.efforts);
+  const eftot = ef.reduce((a,[,v])=>a+v,0)||1;
+  $('#misc').innerHTML = ef.map(([k,v])=>`<div style="display:flex;font-size:13px;padding:3px 0">
+      <span>${esc(k)}</span><span class="right mono">${nf.format(v)} · ${(v/eftot*100).toFixed(0)}%</span></div>`).join('')
+    + `<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line);font-size:13px">
+       subagentes: <b class="mono">${money(s.subagents.usd)}</b> em ${nf.format(s.subagents.requests)} requests</div>`;
+
+  $('#foot').textContent = `histórico local: ${nf.format(t.all.requests)} requests · ${toks(t.all.tokens)} tokens · ${money(t.all.usd)} equivalente API`;
+}
+tick(); setInterval(tick, 20000);
+</script>
+</body>
+</html>
