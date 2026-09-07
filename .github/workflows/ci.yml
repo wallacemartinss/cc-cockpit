@@ -23,10 +23,13 @@ jobs:
           python -m build
 
       - name: The dashboard must ship inside the wheel
-        run: python -c "
-          import glob, zipfile;
-          names = zipfile.ZipFile(sorted(glob.glob('dist/*.whl'))[-1]).namelist();
-          assert 'cockpit/web/index.html' in names, names"
+        run: |
+          python - <<'PY'
+          import glob, zipfile
+          names = zipfile.ZipFile(sorted(glob.glob("dist/*.whl"))[-1]).namelist()
+          assert "cockpit/web/index.html" in names, names
+          print("ok:", len(names), "entries")
+          PY
 
       - name: Install and smoke-test without the GTK bindings
         run: |
