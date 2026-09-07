@@ -10,7 +10,8 @@ from pathlib import Path
 from . import config
 from .stats import summary
 
-WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+# inside the package, so it survives a wheel install
+WEB_DIR = Path(__file__).resolve().parent / "web"
 _CACHE: dict = {"at": 0.0, "data": None}
 _LOCK = threading.Lock()
 
@@ -39,15 +40,21 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         path = self.path.split("?")[0]
-        if path == "/api/summary":
-            self._send(200, json.dumps(cached_summary()).encode(), "application/json")
-        elif path == "/api/config":
-            self._send(200, json.dumps(config.load()).encode(), "application/json")
-        elif path in ("/", "/index.html"):
-            f = WEB_DIR / "index.html"
-            self._send(200, f.read_bytes(), "text/html; charset=utf-8")
-        else:
-            self._send(404, b"not found", "text/plain; charset=utf-8")
+        try:
+            if path == "/api/summary":
+                self._send(200, json.dumps(cached_summary()).encode(), "application/json")
+            elif path == "/api/config":
+                self._send(200, json.dumps(config.load()).encode(), "application/json")
+            elif path in ("/", "/index.html"):
+                body = (WEB_DIR / "index.html").read_bytes()
+                self._send(200, body, "text/html; charset=utf-8")
+            else:
+                self._send(404, b"not found", "text/plain; charset=utf-8")
+        except Exception as exc:
+            # an unhandled error used to drop the connection with no response,
+            # which looks like "server is down" instead of "server is broken"
+            message = f"cc-cockpit: {type(exc).__name__}: {exc}"
+            self._send(500, message.encode(), "text/plain; charset=utf-8")
 
 
 def serve(port: int | None = None, open_browser: bool = False) -> None:

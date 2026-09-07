@@ -1,2 +1,3 @@
-"""cc-cockpit - painel de uso do Claude Code."""
-__version__ = "0.1.0"
+"""cc-cockpit - Claude Code usage panel."""
+
+__version__ = "0.2.0"

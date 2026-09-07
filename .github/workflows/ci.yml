@@ -1,0 +1,41 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Compile every module
+        run: python -m compileall -q cockpit
+
+      - name: Build wheel and sdist
+        run: |
+          python -m pip install --quiet build
+          python -m build
+
+      - name: The dashboard must ship inside the wheel
+        run: python -c "
+          import glob, zipfile;
+          names = zipfile.ZipFile(sorted(glob.glob('dist/*.whl'))[-1]).namelist();
+          assert 'cockpit/web/index.html' in names, names"
+
+      - name: Install and smoke-test without the GTK bindings
+        run: |
+          python -m pip install --quiet dist/*.whl
+          cc-cockpit --version
+          cc-cockpit collect
+          cc-cockpit --lang en json > /dev/null
+
+      - name: Build the .deb
+        run: |
+          ./packaging/build-deb.sh
+          dpkg-deb -I dist/*.deb

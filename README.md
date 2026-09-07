@@ -29,45 +29,51 @@ as a weight unit for consumption and shows how much the plan returns.
 
 ## Install
 
+**Debian / Ubuntu** — the `.deb` pulls in the GTK dependencies by itself:
+
 ```bash
-sudo apt install gir1.2-ayatanaappindicator3-0.1   # tray only
-./install.sh
-cc-cockpit          # tray + dashboard in the background
+# from the latest release
+sudo apt install ./cc-cockpit_0.2.0_all.deb
+cc-cockpit setup
 ```
 
-`install.sh` creates `~/.local/bin/cc-cockpit` and registers the GNOME autostart
-entry.
+**Arch** — from the AUR:
 
 ```bash
+yay -S cc-cockpit    # or: makepkg -si from packaging/PKGBUILD
+cc-cockpit setup
+```
+
+**Any distribution** — pipx, reusing the system GTK bindings:
+
+```bash
+sudo apt install python3-gi python3-cairo gir1.2-ayatanaappindicator3-0.1  # tray only
+pipx install cc-cockpit --system-site-packages
+cc-cockpit setup
+```
+
+`--system-site-packages` is what lets the virtualenv see PyGObject and pycairo.
+Without them the tray is unavailable, and the dashboard and `report` still work.
+
+**From a checkout**:
+
+```bash
+git clone https://github.com/wallacemartinss/cc-cockpit
+cd cc-cockpit && ./install.sh
+```
+
+`cc-cockpit setup` registers the GNOME autostart entry, captures the statusline
+(see below), checks the tray dependencies and runs the first collection.
+`cc-cockpit setup --remove` undoes the autostart entry.
+
+```bash
+cc-cockpit                 # tray + dashboard in the background
 cc-cockpit report          # terminal summary
 cc-cockpit serve --open    # dashboard only (http://127.0.0.1:8765)
 cc-cockpit json            # everything as JSON, for scripting
 cc-cockpit collect         # ingest new transcripts and exit
 cc-cockpit config          # config path and contents
-cc-cockpit statusline --install   # capture the official numbers (see below)
 cc-cockpit --lang es report
-```
-
-## Configuration
-
-`~/.config/cc-cockpit/config.json`:
-
-```jsonc
-{
-  "language": "auto",            // auto (follows the OS) | en | pt | es
-  "block_hours": 5,
-  "limits": { "block_usd": null, "week_usd": null },  // null = auto-calibrate
-  "tray_metric": "block",        // block | week | today | none
-  "menu_bar_style": "blocks",    // blocks | dots | emoji (emoji is the colourful one)
-  "tray_show_cost": true,
-  "refresh_seconds": 20,
-  "plan_monthly_usd": null,      // e.g. 200 -> shows how many times the plan paid for itself
-  "plan_name": "",
-  "local_currency": null,        // e.g. {"code":"BRL","symbol":"R$","rate":5.4}
-  "dashboard_port": 8765,
-  "warn_pct": 70,
-  "critical_pct": 90
-}
 ```
 
 ## The real numbers, from the statusline
@@ -159,6 +165,13 @@ statusline payload (stdin)      official rate limits + context ├─> cockpit/
   `sonnet`, `haiku`, `fable`) until they are added to `pricing.py`.
 - `<synthetic>` rows are responses the CLI generates locally: they show up in
   the request count and cost nothing.
+
+## Packaging
+
+`packaging/` holds the `.deb` build script and the Arch `PKGBUILD`; see
+[packaging/README.md](packaging/README.md) for the release flow. A `v*` tag
+builds the wheel, the sdist and the `.deb`, publishes to PyPI and attaches
+everything to the GitHub release.
 
 ## License
 

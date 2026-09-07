@@ -7,7 +7,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import anchors, calibration, config, i18n, server
+from . import __version__, anchors, calibration, config, desktop, i18n, server
 from .collector import refresh
 from .i18n import duration as _dur
 from .i18n import money as _money
@@ -67,6 +67,31 @@ def report(cfg: dict) -> None:
 
     a = tot["all"]
     print("\n  " + t("cli_footer", n=a["requests"], tok=_toks(a["tokens"]), usd=_money(a["usd"])) + "\n")
+
+
+def _setup(args) -> int:
+    if args.remove:
+        removed = desktop.disable_autostart()
+        print(f"autostart: {'removed' if removed else 'was not registered'}")
+        print("statusline: remove the statusLine entry from ~/.claude/settings.json to undo it")
+        return 0
+
+    path = desktop.enable_autostart()
+    print(f"autostart: {path}")
+
+    if not args.no_statusline:
+        from . import statusline as sl
+        print(f"statusline: {sl.SETTINGS}: {sl.install()}")
+
+    ok, missing = desktop.tray_available()
+    if ok:
+        print("tray: ready")
+    else:
+        print(f"tray: unavailable - install {missing}")
+        print("      the dashboard and 'report' work without it")
+    events, new = refresh()
+    print(t("cli_new_events", new=new, total=len(events)))
+    return 0
 
 
 def _pct(value: str | None) -> float | None:
@@ -138,6 +163,7 @@ def _sync_state(s: dict) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="cc-cockpit", description="Claude Code usage panel")
+    parser.add_argument("--version", action="version", version=f"cc-cockpit {__version__}")
     parser.add_argument("--lang", choices=i18n.SUPPORTED, help="override the interface language")
     sub = parser.add_subparsers(dest="cmd")
     sub.add_parser("tray", help="tray indicator for GNOME (default)")
@@ -148,6 +174,11 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("json", help="dump the summary as JSON")
     sub.add_parser("collect", help="ingest new transcripts and exit")
     sub.add_parser("config", help="show the config path and contents")
+    setup_cmd = sub.add_parser(
+        "setup", help="register autostart and the statusline capture")
+    setup_cmd.add_argument("--no-statusline", action="store_true",
+                           help="skip touching ~/.claude/settings.json")
+    setup_cmd.add_argument("--remove", action="store_true", help="undo the autostart entry")
     line = sub.add_parser("statusline",
                           help="capture Claude Code's statusline payload (official numbers)")
     line.add_argument("--chain", help="run another statusline command and print its output")
@@ -181,6 +212,8 @@ def main(argv: list[str] | None = None) -> int:
     elif cmd == "collect":
         events, new = refresh()
         print(t("cli_new_events", new=new, total=len(events)))
+    elif cmd == "setup":
+        return _setup(args)
     elif cmd == "statusline":
         from . import statusline as sl
         if args.install:

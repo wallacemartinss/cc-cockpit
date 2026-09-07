@@ -46,10 +46,18 @@ SETTINGS = Path.home() / ".claude" / "settings.json"
 
 
 def self_command() -> str:
-    """How to invoke this tool from outside: the wrapper when it exists,
-    otherwise the module, since sys.argv[0] points at __main__.py."""
+    """How to invoke this tool from outside.
+
+    sys.argv[0] points at __main__.py, which Claude Code cannot run. Resolve the
+    installed entry point instead, so the registered command keeps working after
+    an upgrade; fall back to the module when running from a checkout.
+    """
+    import shutil
     import sys
 
+    found = shutil.which("cc-cockpit")
+    if found:
+        return f"{found} statusline"
     wrapper = Path.home() / ".local" / "bin" / "cc-cockpit"
     if wrapper.exists():
         return f"{wrapper} statusline"

@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cc-cockpit"
+dynamic = ["version"]
+description = "Claude Code usage panel for GNOME: tray indicator, local dashboard and terminal summary"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Wallace Martins da Silva" }]
+keywords = ["claude", "claude-code", "usage", "gnome", "tray", "appindicator"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: X11 Applications :: GTK",
+    "Intended Audience :: Developers",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: Utilities",
+]
+# No runtime dependencies on purpose: everything else is the standard library.
+# The tray needs PyGObject and pycairo, which must come from the distribution
+# (python3-gi / python-gobject), never from pip - see [project.optional-dependencies].
+dependencies = []
+
+[project.optional-dependencies]
+# Only for environments where the distribution packages are unavailable.
+# On a normal desktop install them with the system package manager instead.
+tray = ["PyGObject>=3.42", "pycairo>=1.20"]
+
+[project.urls]
+Homepage = "https://github.com/wallacemartinss/cc-cockpit"
+Issues = "https://github.com/wallacemartinss/cc-cockpit/issues"
+
+[project.scripts]
+cc-cockpit = "cockpit.cli:main"
+
+[tool.setuptools]
+packages = ["cockpit"]
+
+[tool.setuptools.dynamic]
+version = { attr = "cockpit.__version__" }
+
+[tool.setuptools.package-data]
+cockpit = ["web/*.html"]
