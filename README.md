@@ -1,6 +1,8 @@
 # cc-cockpit
 
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![PyPI](https://img.shields.io/pypi/v/cc-cockpit)](https://pypi.org/project/cc-cockpit/)
+[![AUR](https://img.shields.io/aur/version/cc-cockpit)](https://aur.archlinux.org/packages/cc-cockpit)
 
 A Claude Code usage panel for GNOME: a tray indicator with a consumption ring,
 a local dashboard and a terminal summary.
@@ -37,10 +39,10 @@ sudo apt install ./cc-cockpit_0.2.0_all.deb
 cc-cockpit setup
 ```
 
-**Arch** — from the AUR:
+**Arch** — from the [AUR](https://aur.archlinux.org/packages/cc-cockpit):
 
 ```bash
-yay -S cc-cockpit    # or: makepkg -si from packaging/PKGBUILD
+yay -S cc-cockpit    # or paru, or makepkg -si
 cc-cockpit setup
 ```
 
