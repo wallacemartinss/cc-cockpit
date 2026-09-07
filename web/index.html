@@ -209,7 +209,9 @@ async function tick(){
   $('#gauges').innerHTML = [
     [t('block_of',{h:s.block_hours.toFixed(0)}), b,
       b.active ? t('resets_in',{d:dur(b.remaining_s)}) : t('no_activity')],
-    [t('days7'), w, `${nf().format(w.requests)} ${t('requests')}`],
+    [w.window_source==='anchored' ? t('week_window') : t('days7'), w,
+      w.remaining_s ? t('resets_in',{d:dur(w.remaining_s)})
+                    : `${nf().format(w.requests)} ${t('requests')}`],
     [t('today'), s.today_gauge,
       `${tt.today.requests} ${t('requests')} · ${tt.today.sessions} ${t('sessions')}`],
   ].map(([title,d,cap])=>`

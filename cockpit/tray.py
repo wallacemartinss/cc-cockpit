@@ -164,9 +164,12 @@ class Tray:
         self._sep()
         wp = w.get("pct")
         wstate = icon.state_for(wp, th["warn"], th["critical"])
-        self._row(t("days7") + (f" · {wp:.0f}%" if wp is not None else ""),
+        wtitle = t("week_window") if w.get("window_source") == "anchored" else t("days7")
+        self._row(wtitle + (f" · {wp:.0f}%" if wp is not None else ""),
                   icon.dot(wstate, 16, wp if wp is not None else 0))
         self._row(f"{_gaugebar(wp)}  {_money(w['usd'])} · {_toks(w['tokens'])}")
+        if w.get("remaining_s"):
+            self._row(t("resets_in", d=_dur(w["remaining_s"])))
 
         # day and month
         self._sep()

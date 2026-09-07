@@ -4,8 +4,10 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
+from pathlib import Path
 
-from . import calibration, config, i18n, server
+from . import anchors, calibration, config, i18n, server
 from .collector import refresh
 from .i18n import duration as _dur
 from .i18n import money as _money
@@ -67,33 +69,71 @@ def report(cfg: dict) -> None:
     print("\n  " + t("cli_footer", n=a["requests"], tok=_toks(a["tokens"]), usd=_money(a["usd"])) + "\n")
 
 
-def _calibrate(args, cfg: dict) -> int:
+def _pct(value: str | None) -> float | None:
+    if value is None:
+        return None
+    return float(value.strip().rstrip("%").replace(",", "."))
+
+
+def _sync(args, cfg: dict) -> int:
     if args.reset:
-        calibration.clear(args.window)
-        print(t("cal_cleared", window=args.window))
-        return 0
-    if args.percent is None:
-        data = calibration.load()
-        for window in calibration.WINDOWS:
-            limit = calibration.ceiling(window, data)
-            samples = len(data.get(window, []))
-            print(t("cal_state", window=window, n=samples,
-                    v=_money(limit) if limit else "—"))
+        anchors.clear()
+        calibration.clear()
+        print(t("sync_cleared"))
         return 0
 
+    now = time.time()
+    touched = False
+    for flag, setter in (("block_reset", anchors.set_block_end),
+                         ("week_reset", anchors.set_week_end)):
+        raw = getattr(args, flag)
+        if raw:
+            try:
+                setter(now + anchors.parse_duration(raw))
+            except ValueError as exc:
+                print(str(exc))
+                return 1
+            touched = True
+
+    # the anchors have to be in place before the windows are measured
     s = summary(cfg=cfg)
-    used = s["block"]["usd"] if args.window == "block" else s["week"]["usd"]
-    if used <= 0:
-        print(t("cal_no_usage"))
-        return 1
-    try:
-        implied = calibration.add(args.window, used, args.percent)
-    except ValueError as exc:
-        print(str(exc))
-        return 1
-    print(t("cal_recorded", pct=f"{args.percent:g}", used=_money(used),
-            window=args.window, v=_money(implied)))
+    for window, raw in (("block", args.block), ("week", args.week)):
+        pct = _pct(raw)
+        if pct is None:
+            continue
+        used = s[window]["usd"]
+        if used <= 0:
+            print(t("cal_no_usage"))
+            continue
+        try:
+            implied = calibration.add(window, used, pct)
+        except ValueError as exc:
+            print(str(exc))
+            return 1
+        print(t("cal_recorded", pct=f"{pct:g}", used=_money(used),
+                window=window, v=_money(implied)))
+        touched = True
+
+    if touched:
+        s = summary(cfg=cfg)
+    _sync_state(s)
     return 0
+
+
+def _sync_state(s: dict) -> None:
+    data = calibration.load()
+    for window in calibration.WINDOWS:
+        info = s[window]
+        limit = calibration.ceiling(window, data)
+        remaining = info.get("remaining_s")
+        print(t("sync_state",
+                window=window,
+                source=t("src_" + info.get("window_source", "local")),
+                pct=f"{info['pct']:.1f}" if info.get("pct") is not None else "—",
+                used=_money(info["usd"]),
+                reset=_dur(remaining) if remaining else "—",
+                n=len(data.get(window, [])),
+                v=_money(limit) if limit else "—"))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -108,12 +148,18 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("json", help="dump the summary as JSON")
     sub.add_parser("collect", help="ingest new transcripts and exit")
     sub.add_parser("config", help="show the config path and contents")
-    cal = sub.add_parser("calibrate",
-                         help="teach the reference ceiling using the percentage Claude Code shows")
-    cal.add_argument("percent", nargs="?", type=float,
-                     help="the percentage currently reported for the window")
-    cal.add_argument("--window", choices=calibration.WINDOWS, default="block")
-    cal.add_argument("--reset", action="store_true", help="drop the recorded samples")
+    line = sub.add_parser("statusline",
+                          help="capture Claude Code's statusline payload (official numbers)")
+    line.add_argument("--chain", help="run another statusline command and print its output")
+    line.add_argument("--install", action="store_true",
+                      help="register it in ~/.claude/settings.json (keeps a backup)")
+    sync = sub.add_parser(
+        "sync", help="feed it what Claude Code's usage panel shows (percent and reset)")
+    sync.add_argument("--block", metavar="PCT", help="percent used in the current session window")
+    sync.add_argument("--block-reset", metavar="TIME", help="e.g. '1h55' or '1 h 55 min'")
+    sync.add_argument("--week", metavar="PCT", help="percent used in the weekly window")
+    sync.add_argument("--week-reset", metavar="TIME", help="e.g. '1h15'")
+    sync.add_argument("--reset", action="store_true", help="drop anchors and samples")
     args = parser.parse_args(argv)
 
     cfg = config.ensure()
@@ -135,8 +181,14 @@ def main(argv: list[str] | None = None) -> int:
     elif cmd == "collect":
         events, new = refresh()
         print(t("cli_new_events", new=new, total=len(events)))
-    elif cmd == "calibrate":
-        return _calibrate(args, cfg)
+    elif cmd == "statusline":
+        from . import statusline as sl
+        if args.install:
+            print(f"{sl.SETTINGS}: {sl.install()}")
+            return 0
+        return sl.main(args.chain)
+    elif cmd == "sync":
+        return _sync(args, cfg)
     elif cmd == "config":
         print(config.CONFIG_FILE)
         print(json.dumps(cfg, indent=2, ensure_ascii=False))

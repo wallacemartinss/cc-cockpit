@@ -6,7 +6,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from . import calibration, config, i18n
+from . import anchors, calibration, config, i18n, panel
 from .collector import Event, refresh
 from .sessions import live_sessions
 
@@ -190,6 +190,20 @@ def summary(events: list[Event] | None = None, cfg: dict | None = None) -> dict:
         active = blocks[-1]
     closed = [b for b in blocks if b is not active]
 
+    # The account-wide window may have opened before the first local request
+    # (the Claude app shares the same limit), so a known end wins over the
+    # local estimate: official statusline data first, manual anchor second.
+    official_block = panel.window("block", now)
+    end_override = official_block["resets_at"] if official_block else anchors.block_end(now)
+    block_source = "official" if official_block else ("anchored" if end_override else "local")
+    if end_override:
+        start = end_override - block_hours * HOUR
+        bucket = Bucket()
+        for e in events:
+            if start <= e.t < end_override:
+                bucket.add(e)
+        active = {"start": start, "end": end_override, "bucket": bucket}
+
     # ceilings, in order of trust: manual config > calibration against the
     # percentage Claude Code reports > the largest value ever observed
     lim_block, src_block = cfg["limits"].get("block_usd"), "manual"
@@ -209,6 +223,15 @@ def summary(events: list[Event] | None = None, cfg: dict | None = None) -> dict:
         lim_week = max(weeks.values(), default=0.0)
         src_week = "peak"
 
+    def _official_gauge(info: dict | None, bucket: Bucket) -> dict:
+        """Official percentage wins, and it also reveals the real ceiling."""
+        if not info:
+            return {}
+        pct = info["pct"]
+        limit = round(bucket.usd / (pct / 100), 2) if pct > 0 else None
+        return {"pct": round(pct, 1), "limit": limit, "limit_source": "official",
+                "official_age_s": info["age_s"]}
+
     if active:
         b = active["bucket"]
         elapsed = max(now - active["start"], 1.0)
@@ -226,6 +249,8 @@ def summary(events: list[Event] | None = None, cfg: dict | None = None) -> dict:
             **b.as_dict(),
             **_gauge(b.usd, lim_block),
             "limit_source": src_block,
+            "window_source": block_source,
+            **_official_gauge(official_block, b),
         }
         if lim_block and burn > 0:
             headroom = max(lim_block - b.usd, 0.0)
@@ -237,17 +262,39 @@ def summary(events: list[Event] | None = None, cfg: dict | None = None) -> dict:
         block_info = {"active": False, "start": None, "end": None, "remaining_s": 0,
                       "burn_usd_per_h": 0.0, "burn_tok_per_min": 0.0, "projected_usd": 0.0,
                       "eta_limit_s": None, **nxt.as_dict(), **_gauge(0, lim_block),
-                      "limit_source": src_block}
+                      "limit_source": src_block, "window_source": block_source}
 
     lim_day = max((b.usd for d, b in daily.items() if d != datetime.now().astimezone().strftime("%Y-%m-%d")), default=0.0)
 
-    week = totals["last_7d"]
-    week_info = {**week.as_dict(), **_gauge(week.usd, lim_week), "limit_source": src_week}
+    official_week = panel.window("week", now)
+    if official_week:
+        w_end = official_week["resets_at"]
+        week_window = (w_end - 7 * 24 * HOUR, w_end)
+    else:
+        week_window = anchors.week_window(now)
+    if week_window:
+        w_start, w_end = week_window
+        week = Bucket()
+        for e in events:
+            if w_start <= e.t < w_end:
+                week.add(e)
+        week_extra = {"window_source": "official" if official_week else "anchored",
+                      "start": w_start, "end": w_end,
+                      "remaining_s": max(0.0, w_end - now)}
+    else:
+        week = totals["last_7d"]
+        week_extra = {"window_source": "rolling", "start": now - 7 * 24 * HOUR,
+                      "end": now, "remaining_s": None}
+    week_info = {**week.as_dict(), **_gauge(week.usd, lim_week),
+                 "limit_source": src_week, **week_extra,
+                 **_official_gauge(official_week, week)}
 
     live = live_sessions()
-    for s in live:
-        b = per_session.get(s["session_id"])
-        s["usage"] = b.as_dict() if b else Bucket().as_dict()
+    contexts = panel.contexts()
+    for item in live:
+        b = per_session.get(item["session_id"])
+        item["usage"] = b.as_dict() if b else Bucket().as_dict()
+        item["context"] = contexts.get(item["session_id"], {})
 
     plan = cfg.get("plan_monthly_usd")
     value = totals["month"].usd

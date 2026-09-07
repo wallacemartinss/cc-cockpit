@@ -42,7 +42,7 @@ cc-cockpit serve --open    # dashboard only (http://127.0.0.1:8765)
 cc-cockpit json            # everything as JSON, for scripting
 cc-cockpit collect         # ingest new transcripts and exit
 cc-cockpit config          # config path and contents
-cc-cockpit calibrate 21    # teach it the real ceiling (see below)
+cc-cockpit statusline --install   # capture the official numbers (see below)
 cc-cockpit --lang es report
 ```
 
@@ -67,37 +67,63 @@ cc-cockpit --lang es report
 }
 ```
 
-## Calibrating against the real limit
+## The real numbers, from the statusline
 
-Anthropic does not publish the plan limit, and it is nowhere on disk — but the
-CLI does show a percentage (`/usage`, or the plan panel). Tell cc-cockpit that
-number and it derives the ceiling:
+Two things cannot be derived from local transcripts:
 
-```bash
-cc-cockpit calibrate 21              # "21% used" in the current 5h window
-cc-cockpit calibrate 63 --window week
-cc-cockpit calibrate                 # show the samples and the implied ceiling
-cc-cockpit calibrate --reset
+1. **The limit belongs to the account, not to the CLI.** Whatever you consume in
+   the Claude app counts against the same window and leaves nothing on disk, so
+   a window can start before your first local request.
+2. **The weekly limit is a fixed window** with its own reset time, not the
+   rolling 7 days a local reader would assume.
+
+Claude Code pipes a JSON payload into the statusline command on every render,
+and it carries exactly what the plan panel shows:
+
+```json
+"rate_limits": {
+  "five_hour": {"used_percentage": 23, "resets_at": 1788800000},
+  "seven_day": {"used_percentage": 3,  "resets_at": 1788790000}
+}
 ```
 
-Each sample stores `consumption ÷ percentage`; the ceiling is the median of the
-samples, so a couple of readings absorb the delay between seeing the number and
-typing it. Ceilings are picked in order of trust: `limits` in the config (set by
-you) → calibration → your historical peak. The dashboard says which one is in
-use.
+Register the capture once — no credentials, no undocumented endpoint:
 
-The implied ceiling holds while your model mix stays roughly the same, since the
-weighting behind Anthropic's percentage is not documented. Recalibrate after a
-plan change — and note that promos ("+50% weekly limits" and the like) move the
-weekly ceiling while they last.
+```bash
+cc-cockpit statusline --install
+```
+
+It writes `statusLine` into `~/.claude/settings.json`, keeping a `.bak`. If you
+already had one, it is chained rather than replaced, so its output still shows
+in the CLI. The captured payload also carries the **context window percentage
+per session**, which the dashboard shows next to each open session.
+
+From then on the official percentage is the source of truth, and it reveals the
+real ceiling — `local consumption ÷ official percentage` — so the currency
+figures stay meaningful too.
+
+### When there is no statusline data yet
+
+Numbers fall back, in order of trust: **official** (statusline) → **anchored**
+(what you typed) → **local estimate**. The middle one exists because a fresh
+install has no capture yet:
+
+```bash
+cc-cockpit sync --block 23% --block-reset 1h55 --week 3% --week-reset 1h15
+cc-cockpit sync            # show anchors, samples and implied ceilings
+cc-cockpit sync --reset
+```
+
+Both the tray and the dashboard say which source is in use.
 
 ## How it works
 
 ```
 ~/.claude/projects/**/*.jsonl   transcripts (usage per request)
-~/.claude/sessions/*.json       one entry per live CLI  ─┐
-                                                          ├─> cockpit/
-      ~/.local/share/cc-cockpit/events.ndjson  <──────────┘
+~/.claude/sessions/*.json       one entry per live CLI       ─┐
+statusline payload (stdin)      official rate limits + context ├─> cockpit/
+      ~/.local/share/cc-cockpit/events.ndjson  <───────────────┘
+      ~/.local/share/cc-cockpit/panel.json     official snapshot
 ```
 
 - `collector.py` reads each transcript **from the last offset**, so a refresh
@@ -114,11 +140,18 @@ weekly ceiling while they last.
   cache-write TTLs and the calculation uses that split instead of assuming 5m.
 - `i18n.py` holds one catalogue for all three surfaces, plus locale-aware number
   and currency formatting.
+- `panel.py` keeps the official snapshot and appends a line to
+  `panel-history.ndjson` whenever the percentage changes.
 
 ## Honest limitations
 
-- Without calibration and without `limits`, the percentage is relative to your
-  own history, not to the real plan limit.
+- Without the statusline capture and without `limits`, the percentage is
+  relative to your own history, not to the real plan limit.
+- The statusline only refreshes while a CLI session is rendering. That is
+  enough — what is not running cannot be consuming — but right after a long
+  gap the percentage may lag until the next render.
+- Consumption from the Claude app shows up in the official percentage, never in
+  the local currency figures, which read Claude Code transcripts only.
 - Models released after this version fall back to their family price (`opus`,
   `sonnet`, `haiku`, `fable`) until they are added to `pricing.py`.
 - `<synthetic>` rows are responses the CLI generates locally: they show up in
