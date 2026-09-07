@@ -245,16 +245,19 @@ class Tray:
         self._action(t("quit"), lambda *_: Gtk.main_quit())
 
     # ---------- settings ----------
+    # GNOME's appindicator extension renders submenus inline and stops at one
+    # level: a third level never opens. So each option is a single item that
+    # cycles through its values, which also keeps the menu short.
     def _settings_menu(self) -> Gtk.Menu:
         menu = Gtk.Menu()
         block = t("block_of", h=f"{self.cfg.get('block_hours', 5):.0f}")
-        self._choice(menu, t("panel_shows"), "tray_metric", [
+        self._cycle(menu, t("panel_shows"), "tray_metric", [
             ("block", block), ("week", t("days7")),
             ("today", t("today")), ("none", t("metric_none"))])
-        self._choice(menu, t("bar_style"), "menu_bar_style", [
+        self._cycle(menu, t("bar_style"), "menu_bar_style", [
             ("blocks", t("style_blocks")), ("dots", t("style_dots")),
             ("emoji", t("style_emoji"))])
-        self._choice(menu, t("language_label"), "language", [
+        self._cycle(menu, t("language_label"), "language", [
             ("auto", t("auto")), ("en", "English"),
             ("pt", "Português"), ("es", "Español")])
 
@@ -271,28 +274,19 @@ class Tray:
             menu.append(item)
         return menu
 
-    def _choice(self, parent: Gtk.Menu, label: str, key: str,
-                options: list[tuple[str, str]]) -> None:
+    def _cycle(self, parent: Gtk.Menu, label: str, key: str,
+               options: list[tuple[str, str]]) -> None:
+        values = [value for value, _ in options]
+        texts = dict(options)
         current = self.cfg.get(key)
-        submenu = Gtk.Menu()
-        for value, text in options:
-            item = Gtk.CheckMenuItem(label=text)
-            item.set_draw_as_radio(True)
-            item.set_active(current == value)
-            item.connect("toggled", self._on_choice, key, value)
-            submenu.append(item)
-        holder = Gtk.MenuItem(label=label)
-        holder.set_submenu(submenu)
-        parent.append(holder)
-
-    def _on_choice(self, item: Gtk.CheckMenuItem, key: str, value: str) -> None:
-        # set_active() during a rebuild also fires "toggled"; ignore those
-        if self._rebuilding or not item.get_active():
-            return
-        self._apply_setting(key, value)
+        position = values.index(current) if current in values else 0
+        following = values[(position + 1) % len(values)]
+        item = Gtk.MenuItem(label=f"{label}:  {texts.get(current, current)}   ⟳")
+        item.connect("activate", lambda *_: self._apply_setting(key, following))
+        parent.append(item)
 
     def _apply_setting(self, key: str, value) -> None:
-        if self.cfg.get(key) == value:
+        if self._rebuilding or self.cfg.get(key) == value:
             return
         self.cfg[key] = value
         config.save(self.cfg)
