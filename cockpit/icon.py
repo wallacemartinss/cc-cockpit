@@ -70,3 +70,34 @@ def render(pct: float | None, state: str, seq: int) -> str:
     surf.write_to_png(str(ICON_DIR / f"{name}.png"))
     surf.write_to_png(str(themed / f"{name}.png"))
     return name
+
+
+def dot(state: str, size: int = 16, ring: float | None = None) -> str:
+    """Bolinha colorida (ou anel com progresso) para usar dentro do menu."""
+    ICON_DIR.mkdir(parents=True, exist_ok=True)
+    tag = f"{state}-{size}" + (f"-{int(ring)}" if ring is not None else "")
+    path = ICON_DIR / f"dot-{tag}.png"
+    if path.exists():
+        return str(path)
+    surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, size, size)
+    ctx = cairo.Context(surf)
+    cr, cg, cb = PALETTE[state]
+    c = size / 2
+    if ring is None:
+        ctx.set_source_rgb(cr, cg, cb)
+        ctx.arc(c, c, size * 0.30, 0, 2 * math.pi)
+        ctx.fill()
+    else:
+        r = size * 0.36
+        ctx.set_line_width(size * 0.16)
+        ctx.set_line_cap(cairo.LINE_CAP_ROUND)
+        ctx.set_source_rgba(cr, cg, cb, 0.28)
+        ctx.arc(c, c, r, 0, 2 * math.pi)
+        ctx.stroke()
+        p = max(0.0, min(100.0, ring)) / 100
+        if p > 0:
+            ctx.set_source_rgb(cr, cg, cb)
+            ctx.arc(c, c, r, -math.pi / 2, -math.pi / 2 + 2 * math.pi * p)
+            ctx.stroke()
+    surf.write_to_png(str(path))
+    return str(path)

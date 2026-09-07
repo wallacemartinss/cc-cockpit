@@ -50,6 +50,18 @@ def _toks(n: int) -> str:
     return str(n)
 
 
+def _gaugebar(pct: float | None, width: int = 14) -> str:
+    if pct is None:
+        return "▱" * width
+    fill = int(round(min(pct, 100) / 100 * width))
+    return "▰" * fill + "▱" * (width - fill)
+
+
+def _minibar(frac: float, width: int = 6) -> str:
+    fill = max(1, int(round(frac * width)))
+    return "▰" * fill + "▱" * (width - fill)
+
+
 def _dur(s: float) -> str:
     s = max(0, int(s))
     d, h, m = s // 86400, s % 86400 // 3600, s % 3600 // 60
@@ -133,62 +145,100 @@ class Tray:
             self.menu.remove(child)
 
         if "error" in s:
-            self._info(f"erro: {s['error'][:80]}")
-        else:
-            b, w, t = s["block"], s["week"], s["totals"]
-            head = f"Bloco de {s['block_hours']:.0f}h"
-            if b["active"]:
-                pct = f"{b['pct']:.0f}%" if b.get("pct") is not None else "—"
-                self._info(f"{head}: {pct} · {_money(b['usd'])}")
-                self._info(f"   reseta em {_dur(b['remaining_s'])} · ritmo {_money(b['burn_usd_per_h'])}/h")
-                self._info(f"   projeção {_money(b['projected_usd'])}"
-                           + (f" · teto em {_dur(b['eta_limit_s'])}" if b.get("eta_limit_s") else ""))
-            else:
-                self._info(f"{head}: inativo")
-            wp = f"{w['pct']:.0f}%" if w.get("pct") is not None else "—"
-            self._info(f"7 dias: {wp} · {_money(w['usd'])} · {_toks(w['tokens'])}")
-            self._info(f"Hoje: {_money(t['today']['usd'])} · {_toks(t['today']['tokens'])} · "
-                       f"{t['today']['requests']} req")
-            self._info(f"Mês: {_money(t['month']['usd'])} · cache hit {t['last_7d']['cache_hit_pct']:.0f}%")
-
+            self._row("nao consegui ler o historico", icon.dot("crit"))
+            self._row(s["error"][:70])
             self._sep()
-            sess = s["sessions"]
-            if sess:
-                sub = Gtk.Menu()
-                for x in sess:
-                    mark = "▶" if x["status"] == "busy" else "•"
-                    it = Gtk.MenuItem(label=f"{mark} {x['name']} · {_money(x['usage']['usd'])}")
-                    inner = Gtk.Menu()
-                    for line in (x["cwd"], f"pid {x['pid']} · {x['status']} · v{x['version']}",
-                                 f"aberta há {_dur(x['uptime_s'])} · ociosa há {_dur(x['idle_s'])}",
-                                 f"{_toks(x['usage']['tokens'])} tokens · {x['usage']['requests']} req",
-                                 f"RAM {x['rss_mb']:.0f} MB"):
-                        sit = Gtk.MenuItem(label=line)
-                        sit.set_sensitive(False)
-                        inner.append(sit)
-                    it.set_submenu(inner)
-                    sub.append(it)
-                parent = Gtk.MenuItem(label=f"Sessões abertas ({len(sess)})")
-                parent.set_submenu(sub)
-                self.menu.append(parent)
-            else:
-                self._info("Nenhuma sessão aberta")
+            self._actions()
+            self.menu.show_all()
+            return
 
-            if s["projects_today"]:
-                sub = Gtk.Menu()
-                for p in s["projects_today"]:
-                    it = Gtk.MenuItem(label=f"{p['label']} · {_money(p['usd'])} · {_toks(p['tokens'])}")
-                    it.set_sensitive(False)
-                    sub.append(it)
-                parent = Gtk.MenuItem(label="Projetos de hoje")
-                parent.set_submenu(sub)
-                self.menu.append(parent)
+        th = s["thresholds"]
+        b, w, t = s["block"], s["week"], s["totals"]
+
+        # --- bloco de rate limit ---
+        pct = b.get("pct") if b["active"] else None
+        st = icon.state_for(pct, th["warn"], th["critical"])
+        head = f"Bloco de {s['block_hours']:.0f}h"
+        if pct is not None:
+            head += f" · {pct:.0f}%"
+        self._row(head, icon.dot(st, 16, pct if pct is not None else 0))
+        if b["active"]:
+            self._row(f"{_gaugebar(pct)}  {_money(b['usd'])}")
+            self._row(f"reseta em {_dur(b['remaining_s'])} · {_money(b['burn_usd_per_h'])}/h "
+                      f"· projeção {_money(b['projected_usd'])}")
+            if b.get("eta_limit_s"):
+                self._row(f"no ritmo atual, teto em {_dur(b['eta_limit_s'])}")
+        else:
+            self._row("sem atividade na janela atual")
+
+        # --- semana ---
+        self._sep()
+        wp = w.get("pct")
+        wst = icon.state_for(wp, th["warn"], th["critical"])
+        self._row(f"7 dias · {wp:.0f}%" if wp is not None else "7 dias",
+                  icon.dot(wst, 16, wp if wp is not None else 0))
+        self._row(f"{_gaugebar(wp)}  {_money(w['usd'])} · {_toks(w['tokens'])}")
+
+        # --- dia e mes ---
+        self._sep()
+        self._row(f"Hoje · {_money(t['today']['usd'])}", icon.dot("idle"))
+        self._row(f"{_toks(t['today']['tokens'])} tokens · {t['today']['requests']} requests")
+        self._row(f"Mês · {_money(t['month']['usd'])}", icon.dot("idle"))
+        self._row(f"cache hit {t['last_7d']['cache_hit_pct']:.0f}% nos últimos 7 dias")
+
+        # --- sessoes vivas ---
+        self._sep()
+        sess = s["sessions"]
+        if not sess:
+            self._row("Nenhuma sessão aberta", icon.dot("idle"))
+        for x in sess:
+            busy = x["status"] == "busy"
+            it = Gtk.ImageMenuItem.new_with_label(
+                f"{x['name']} · {_money(x['usage']['usd'])} · {_toks(x['usage']['tokens'])}")
+            it.set_image(Gtk.Image.new_from_file(icon.dot("ok" if busy else "idle")))
+            it.set_always_show_image(True)
+            inner = Gtk.Menu()
+            for line in (
+                x["cwd"],
+                f"{'trabalhando' if busy else 'ociosa há ' + _dur(x['idle_s'])} · aberta há {_dur(x['uptime_s'])}",
+                f"{x['usage']['requests']} requests · {_toks(x['usage']['tokens'])} tokens",
+                f"pid {x['pid']} · {x['rss_mb']:.0f} MB · v{x['version']}",
+            ):
+                sit = Gtk.MenuItem(label=line)
+                sit.set_sensitive(False)
+                inner.append(sit)
+            it.set_submenu(inner)
+            self.menu.append(it)
+
+        # --- projetos do dia ---
+        if s["projects_today"]:
+            self._sep()
+            top = s["projects_today"][:5]
+            mx = max(p["usd"] for p in top) or 1
+            self._row("Projetos de hoje", icon.dot("idle"))
+            for p in top:
+                self._row(f"{_minibar(p['usd'] / mx)} {p['label'][:24]} · {_money(p['usd'])}")
 
         self._sep()
+        self._actions()
+        self.menu.show_all()
+
+    def _actions(self) -> None:
         self._action("Abrir dashboard", lambda *_: webbrowser.open(self.url))
         self._action("Atualizar agora", self.refresh)
         self._action("Sair", lambda *_: Gtk.main_quit())
-        self.menu.show_all()
+
+    def _row(self, text: str, icon_path: str | None = None) -> None:
+        """Linha informativa. Fica habilitada de proposito: item desabilitado
+        no GNOME vira cinza-claro e o menu inteiro parece apagado."""
+        if icon_path:
+            it = Gtk.ImageMenuItem.new_with_label(text)
+            it.set_image(Gtk.Image.new_from_file(icon_path))
+            it.set_always_show_image(True)
+        else:
+            it = Gtk.MenuItem(label=text)
+        it.connect("activate", lambda *_: None)
+        self.menu.append(it)
 
     def _info(self, text: str) -> None:
         it = Gtk.MenuItem(label=text)
