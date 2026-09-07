@@ -73,6 +73,7 @@ class Tray:
         self.ind.set_status(AppIndicator.IndicatorStatus.ACTIVE)
         self.menu = Gtk.Menu()
         self.ind.set_menu(self.menu)
+        self.ind.set_title("cc-cockpit")
         self.ind.set_label("cc", "cc-cockpit")
 
         port = int(self.cfg.get("dashboard_port") or 8765)

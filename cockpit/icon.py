@@ -35,8 +35,9 @@ def render(pct: float | None, state: str, seq: int) -> str:
     O nome muda a cada render porque o indicador ignora um arquivo cujo
     nome nao mudou - e o cache dele nao percebe reescrita no mesmo path.
     """
-    ICON_DIR.mkdir(parents=True, exist_ok=True)
-    for old in ICON_DIR.glob("cc-cockpit-*.png"):
+    themed = ICON_DIR / "hicolor" / f"{SIZE}x{SIZE}" / "apps"
+    themed.mkdir(parents=True, exist_ok=True)
+    for old in list(ICON_DIR.glob("cc-cockpit-*.png")) + list(themed.glob("cc-cockpit-*.png")):
         old.unlink(missing_ok=True)
 
     name = f"cc-cockpit-{seq % 1000}"
@@ -64,5 +65,8 @@ def render(pct: float | None, state: str, seq: int) -> str:
     ctx.arc(cx, cy, 7.5, 0, 2 * math.pi)
     ctx.fill()
 
+    # o arquivo solto cobre o resolvedor antigo; a copia em hicolor/ cobre o
+    # GTK4, que nao procura mais icone fora de uma estrutura de tema
     surf.write_to_png(str(ICON_DIR / f"{name}.png"))
+    surf.write_to_png(str(themed / f"{name}.png"))
     return name
