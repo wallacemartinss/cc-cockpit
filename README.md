@@ -78,6 +78,33 @@ cc-cockpit config          # config path and contents
 cc-cockpit --lang es report
 ```
 
+## Configuration
+
+**Settings** in the tray menu opens a proper window — GNOME's appindicator
+extension renders submenus inline and stops at one level, and a menu has nowhere
+to type a number. Saving applies right away, without a restart.
+
+Everything lives in `~/.config/cc-cockpit/config.json`, and any key missing from
+the file is written back on start, so new options show up there:
+
+```jsonc
+{
+  "language": "auto",            // auto (follows the OS) | en | pt | es
+  "block_hours": 5,
+  "limits": { "block_usd": null, "week_usd": null },  // null = automatic
+  "tray_metric": "block",        // block | week | today | none
+  "tray_show_cost": true,
+  "menu_bar_style": "blocks",    // blocks | dots | emoji
+  "refresh_seconds": 20,
+  "plan_monthly_usd": null,      // e.g. 200 -> shows how many times the plan paid for itself
+  "plan_name": "",
+  "local_currency": null,        // e.g. {"code":"BRL","symbol":"R$","rate":5.4}
+  "dashboard_port": 8765,
+  "warn_pct": 70,
+  "critical_pct": 90
+}
+```
+
 ## The real numbers, from the statusline
 
 Two things cannot be derived from local transcripts:
