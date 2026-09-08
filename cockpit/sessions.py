@@ -17,7 +17,7 @@ from pathlib import Path
 from .accounts import Account, primary
 
 
-def _proc_starttime(pid: int) -> str | None:
+def proc_starttime(pid: int) -> str | None:
     try:
         stat = Path(f"/proc/{pid}/stat").read_bytes()
     except OSError:
@@ -30,7 +30,7 @@ def _proc_starttime(pid: int) -> str | None:
         return None
 
 
-def _cmdline(pid: int) -> str:
+def cmdline(pid: int) -> str:
     try:
         return Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\x00", b" ").decode(errors="replace").strip()
     except OSError:
@@ -62,13 +62,13 @@ def live_sessions(account: Account | None = None) -> list[dict]:
         pid = d.get("pid")
         if not isinstance(pid, int):
             continue
-        st = _proc_starttime(pid)
+        st = proc_starttime(pid)
         if st is None:
             continue
         want = str(d.get("procStart") or "")
         if want and st != want:
             continue  # pid recycled by another process
-        if "claude" not in _cmdline(pid):
+        if "claude" not in cmdline(pid):
             continue
         started = (d.get("startedAt") or 0) / 1000
         updated = (d.get("statusUpdatedAt") or d.get("updatedAt") or 0) / 1000

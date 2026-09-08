@@ -41,7 +41,7 @@ if _IND_NS == "AyatanaAppIndicator3":
 else:
     from gi.repository import AppIndicator3 as AppIndicator  # noqa: E402
 
-from . import accounts, config, icon, server, stats, terminal  # noqa: E402
+from . import accounts, config, icon, instance, server, stats, terminal  # noqa: E402
 from .i18n import duration as _dur  # noqa: E402
 from .i18n import money as _money  # noqa: E402
 from .i18n import t  # noqa: E402
@@ -475,6 +475,14 @@ class Tray:
 
 
 def main() -> None:
+    # setup writes an autostart entry and the README also says to start the tray
+    # by hand for the session already running, so this command gets run twice.
+    # A second indicator with a dead dashboard is worse than a plain message.
+    other = instance.claim()
+    if other is not None:
+        print(f"cc-cockpit: the tray is already running (pid {other})")
+        return
+
     settings = Gtk.Settings.get_default()
     if settings is not None:
         # The state in this menu is carried by the coloured dots, and GTK hides
@@ -482,4 +490,7 @@ def main() -> None:
         # desktops since GTK deprecated the property.
         settings.set_property("gtk-menu-images", True)
     Tray()
-    Gtk.main()
+    try:
+        Gtk.main()
+    finally:
+        instance.release()

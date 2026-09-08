@@ -100,7 +100,9 @@ nohup cc-cockpit tray >/dev/null 2>&1 &   # tray now, without logging out
 That autostart entry only fires on the next login, so the last line starts the
 tray in the session you are already in — the icon shows up right away, with no
 need to log out. It is the same command on every distribution, and it is only
-needed once: from the next login on, autostart takes care of it.
+needed once: from the next login on, autostart takes care of it. Running it
+again is harmless — a second tray refuses to start and says which pid already
+holds it.
 
 ```bash
 cc-cockpit                 # tray + dashboard in the background

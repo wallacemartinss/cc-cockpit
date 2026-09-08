@@ -81,7 +81,14 @@ class Handler(BaseHTTPRequestHandler):
 def serve(port: int | None = None, open_browser: bool = False) -> None:
     cfg = config.ensure()
     port = port or int(cfg.get("dashboard_port") or 8765)
-    httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    try:
+        httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    except OSError as exc:
+        # the tray runs this in a daemon thread, where an unhandled error is a
+        # traceback nobody asked for and an indicator whose dashboard is dead
+        print(f"cc-cockpit: port {port} is not available ({exc.strerror or exc}). "
+              f"Another instance may already be serving it.")
+        return
     url = f"http://127.0.0.1:{port}/"
     print(f"cc-cockpit at {url}  (ctrl-c to stop)")
     if open_browser:
