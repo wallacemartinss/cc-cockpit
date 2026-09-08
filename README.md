@@ -68,7 +68,7 @@ them. Saving applies right away, without a restart.
 
 ```bash
 # from the latest release
-sudo apt install ./cc-cockpit_0.2.0_all.deb
+sudo apt install ./cc-cockpit_0.4.0_all.deb
 cc-cockpit setup
 nohup cc-cockpit tray >/dev/null 2>&1 &   # tray now, without logging out
 ```

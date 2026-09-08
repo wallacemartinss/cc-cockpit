@@ -374,6 +374,18 @@ def main(argv: list[str] | None = None) -> int:
         print(str(exc))
         return 1
     if cmd == "tray":
+        # `cc-cockpit` with no argument lands here, which is the first thing a
+        # fresh pipx install runs. Importing the tray without PyGObject raised
+        # ModuleNotFoundError at the user - and desktop.py already knew exactly
+        # what to tell them.
+        ok, missing = desktop.tray_available()
+        if not ok:
+            print(f"cc-cockpit: the tray needs {missing}")
+            print(f"            {desktop.tray_host_hint()}")
+            print("            everything else works without it:")
+            print("              cc-cockpit serve --open   dashboard")
+            print("              cc-cockpit report         terminal summary")
+            return 1
         delay = getattr(args, "delay", 0)   # absent when 'tray' came from the default
         if delay > 0:
             time.sleep(delay)
