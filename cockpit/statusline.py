@@ -96,14 +96,17 @@ def install(command: str | None = None, account: Account | None = None) -> str:
     current = settings.get("statusLine")
     if isinstance(current, dict) and "cc-cockpit" in str(current.get("command", "")):
         registered = str(current.get("command", ""))
-        # an old single-account registration has to gain --account once a second
-        # account shows up, or both CLIs write into the same snapshot
-        if command != registered and "--account" in command and "--account" not in registered:
+        # Two ways a registration goes stale: a single-account one that never
+        # gained --account when a second account appeared, and one still naming
+        # an id that was since renamed. Both send the payload to the wrong
+        # snapshot, so both get rewritten.
+        if command != registered and _account_flag(registered) != _account_flag(command):
             shutil.copy2(target, target.with_suffix(".json.bak"))
             settings["statusLine"] = {"type": "command",
                                       "command": _rechain(registered, command)}
             target.write_text(json.dumps(settings, indent=2, ensure_ascii=False) + "\n")
-            return f"updated to --account {acct.id}"
+            return f"updated to --account {acct.id}" if _account_flag(command) \
+                else "updated to the account's own registration"
         return "already registered"
 
     if isinstance(current, dict) and current.get("command"):
@@ -120,6 +123,16 @@ def install(command: str | None = None, account: Account | None = None) -> str:
     settings["statusLine"] = {"type": "command", "command": command}
     target.write_text(json.dumps(settings, indent=2, ensure_ascii=False) + "\n")
     return note
+
+
+def _account_flag(command: str) -> str:
+    """The id in a registered '--account <id>', or '' when there is none."""
+    parts = command.split()
+    if "--account" in parts:
+        index = parts.index("--account")
+        if index + 1 < len(parts):
+            return parts[index + 1]
+    return ""
 
 
 def _rechain(registered: str, command: str) -> str:

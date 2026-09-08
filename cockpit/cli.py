@@ -130,6 +130,46 @@ def _accounts_cmd(args, cfg: dict) -> int:
         else:
             print("  " + t("acct_none_new"))
 
+    if args.rename:
+        for spec in args.rename:
+            if "=" not in spec:
+                print(f"--rename wants old=new, got {spec!r}")
+                return 1
+            old_id, _, new_id = spec.partition("=")
+            try:
+                note = accounts.rename(old_id.strip(), new_id.strip(), cfg)
+            except ValueError as exc:
+                print(str(exc))
+                return 1
+            for entry in entries:
+                if entry.get("id") == old_id.strip():
+                    entry["id"] = new_id.strip()
+            if cfg.get("primary_account") == old_id.strip():
+                cfg["primary_account"] = args.primary = new_id.strip()
+            print(f"  {note}")
+            changed = True
+
+    if args.label:
+        for spec in args.label:
+            if "=" not in spec:
+                print(f"--label wants id=name, got {spec!r}")
+                return 1
+            account_id, _, name = spec.partition("=")
+            for entry in entries:
+                if entry.get("id") == account_id.strip():
+                    entry["label"] = name.strip()
+                    changed = True
+                    break
+            else:
+                # an implicit account has no entry yet; naming it creates one
+                account = accounts.get(account_id.strip(), cfg)
+                if account is None:
+                    print(f"unknown account {account_id.strip()!r}")
+                    return 1
+                entries.append({"id": account.id, "label": name.strip(),
+                                "dir": _tilde(account.claude_dir)})
+                changed = True
+
     if args.add:
         for spec in args.add:
             if "=" not in spec:
@@ -158,6 +198,11 @@ def _accounts_cmd(args, cfg: dict) -> int:
         for account in accounts.listed(cfg):
             if accounts.rehome(account):
                 print(f"  history moved into accounts/{account.id}/")
+        if args.rename:
+            # the id is baked into each settings.json, so it has to follow
+            from . import statusline as sl
+            for account in accounts.listed(cfg):
+                print(f"  statusline {account.id}: {sl.install(account=account)}")
     elif args.primary:
         stored = config.load()
         stored["primary_account"] = cfg["primary_account"] = args.primary
@@ -270,6 +315,10 @@ def main(argv: list[str] | None = None) -> int:
     acct.add_argument("--add", action="append", metavar="ID=DIR",
                       help="add or replace an account, e.g. pessoal=~/.claude-pessoal")
     acct.add_argument("--remove", action="append", metavar="ID", help="drop an account")
+    acct.add_argument("--rename", action="append", metavar="OLD=NEW",
+                      help="change an account id, moving its history with it")
+    acct.add_argument("--label", action="append", metavar="ID=NAME",
+                      help="set the name shown in the tray, tabs and report")
     acct.add_argument("--primary", metavar="ID",
                       help="which account the tray label speaks for")
     tray_cmd = sub.add_parser("tray", help="tray indicator (default)")
@@ -310,7 +359,11 @@ def main(argv: list[str] | None = None) -> int:
 
     cmd = args.cmd or "tray"
     try:
-        if args.account and args.account not in ("all", stats.ALL_ID):
+        # the statusline is exempt: it runs inside the CLI's own render loop, and
+        # a stale --account left by a renamed account must not turn the user's
+        # status line into an error message. It falls back to the primary below.
+        if (args.account and cmd != "statusline"
+                and args.account not in ("all", stats.ALL_ID)):
             accounts.resolve(args.account, cfg)      # fail fast on a typo
     except ValueError as exc:
         print(str(exc))
@@ -348,7 +401,10 @@ def main(argv: list[str] | None = None) -> int:
         return _setup(args)
     elif cmd == "statusline":
         from . import statusline as sl
-        account = accounts.resolve(args.account, cfg)
+        try:
+            account = accounts.resolve(args.account, cfg)
+        except ValueError:
+            account = accounts.primary(cfg)   # renamed or dropped account
         if args.install:
             print(f"{_tilde(sl.settings_file(account))}: {sl.install(account=account)}")
             return 0

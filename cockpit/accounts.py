@@ -256,3 +256,39 @@ def rehome(account: Account) -> bool:
         return False               # something still answers to that id
     legacy.replace(account.data_dir)
     return True
+
+
+def valid_id(account_id: str) -> bool:
+    """An id names a directory under the data dir, so it is not free-form."""
+    return bool(_ID_RE.match(account_id))
+
+
+def rename(old_id: str, new_id: str, cfg: dict | None = None) -> str:
+    """Renames an account id and carries its data directory along.
+
+    The label is a display name and changing it costs nothing. The id is not: it
+    names accounts/<id>/, which holds months Claude Code has already pruned. So
+    this is the one place allowed to change it, and it moves the directory in
+    the same breath - never leaves it behind for a silent fresh start.
+
+    Returns a note for the caller to print. Raises ValueError on a bad request.
+    """
+    cfg = cfg if cfg is not None else config.load()
+    if not valid_id(new_id):
+        raise ValueError(f"{new_id!r} is not a usable id (letters, digits, . _ -)")
+    found = {a.id: a for a in listed(cfg)}
+    if old_id not in found:
+        raise ValueError(f"unknown account {old_id!r} - configured: {', '.join(found)}")
+    if new_id in found:
+        raise ValueError(f"{new_id!r} is already taken")
+
+    source = ACCOUNTS_DIR / old_id
+    target = ACCOUNTS_DIR / new_id
+    if target.exists():
+        raise ValueError(f"{target} already exists - move it aside first")
+    moved = False
+    if source.is_dir():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        source.replace(target)
+        moved = True
+    return f"{old_id} -> {new_id}" + (" (history moved)" if moved else "")

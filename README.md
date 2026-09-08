@@ -105,9 +105,17 @@ snapshot, separate calibration.
 
 ```bash
 cc-cockpit accounts --detect          # finds ~/.claude* and registers them
+cc-cockpit accounts --label default=Empresa   # the name shown everywhere
+cc-cockpit accounts --rename default=empresa  # the id, moving its history along
 cc-cockpit accounts --primary empresa # whose number the tray label shows
 cc-cockpit setup                      # re-registers the statusline in each one
 ```
+
+**Settings** has an *Accounts* section where each name can be edited directly —
+that is the name the tray, the tabs and the report use. The **id** is not
+editable there: it names `accounts/<id>/`, which holds months Claude Code has
+already pruned, so changing it has to move a directory. That is what
+`--rename` does, and it fixes up the statusline registrations too.
 
 That last step matters. The statusline payload carries the account's rate limits
 but nothing that identifies the account, so each `settings.json` gets

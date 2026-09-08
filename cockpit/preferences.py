@@ -19,6 +19,12 @@ from .i18n import t  # noqa: E402
 SPACING = 8
 
 
+def _tilde(path) -> str:
+    from pathlib import Path
+    text, home = str(path), str(Path.home())
+    return "~" + text[len(home):] if text.startswith(home) else text
+
+
 def _number(value) -> str:
     """Optional numbers show as an empty field, never as 'None'."""
     return "" if value in (None, "") else str(value)
@@ -66,16 +72,33 @@ class Preferences(Gtk.Window):
         self.port = self._spin(general, 5, t("dashboard_port"),
                                self.cfg.get("dashboard_port", 8765), 1024, 65535)
 
-        # Accounts are edited in the config file or with `cc-cockpit accounts`;
-        # what belongs here is the one choice that changes what the panel shows.
+        # The name is editable here; the id is not. An id names accounts/<id>/,
+        # which holds months Claude Code has already pruned, so changing it has
+        # to move a directory - that lives in `cc-cockpit accounts --rename`,
+        # not behind a Save button.
         self.primary = None
+        self.aliases: dict[str, Gtk.Entry] = {}
+        self.alias_was: dict[str, str] = {}
         found = accounts.listed(self.cfg)
+        who = self._section(outer, t("accounts"), hint=t("accounts_hint"))
+        for row, account in enumerate(found):
+            entry = self._entry(who, row, account.id, account.label or account.id)
+            entry.set_placeholder_text(account.id)
+            entry.set_tooltip_text(str(account.claude_dir))
+            if not account.exists():
+                entry.set_icon_from_icon_name(Gtk.EntryIconPosition.SECONDARY,
+                                              "dialog-warning-symbolic")
+                entry.set_icon_tooltip_text(Gtk.EntryIconPosition.SECONDARY,
+                                            f"{t('acct_missing')}: {account.claude_dir}")
+            self.aliases[account.id] = entry
+            # what the field started with, so "changed" means the user typed -
+            # an implicit account shows its id and must not be written back
+            # just because someone opened the window and pressed Save
+            self.alias_was[account.id] = entry.get_text()
         if len(found) > 1:
-            who = self._section(outer, t("accounts"), hint=t("combined_note"))
             self.primary = self._combo(
-                who, 0, t("account"), "primary_account",
-                [(a.id, a.title + ("" if a.exists() else f"  ({t('acct_missing')})"))
-                 for a in found])
+                who, len(found), t("panel_account"), "primary_account",
+                [(a.id, a.title) for a in found])
 
         limits = self._section(outer, t("ceilings"), hint=t("ceilings_hint"))
         self.block_usd = self._entry(limits, 0, t("block_limit"),
@@ -188,6 +211,7 @@ class Preferences(Gtk.Window):
 
         if self.primary is not None:
             cfg["primary_account"] = self.primary.get_active_id()
+        self._save_aliases(cfg)
         cfg["warn_pct"] = int(self.warn.get_value())
         cfg["critical_pct"] = int(self.critical.get_value())
 
@@ -195,6 +219,31 @@ class Preferences(Gtk.Window):
         if self.on_saved:
             self.on_saved(cfg)
         self.close()
+
+    def _save_aliases(self, cfg: dict) -> None:
+        """Writes the names back, materialising an implicit account if renamed.
+
+        With nothing configured there is one implicit account and no entry in
+        the file. Naming it has to create that entry - but only when the name
+        actually changed, so an untouched install keeps following
+        CLAUDE_CONFIG_DIR instead of freezing today's path into the config.
+        """
+        entries = list(cfg.get("accounts") or [])
+        by_id = {e.get("id"): e for e in entries if isinstance(e, dict)}
+        for account in accounts.listed(cfg):
+            widget = self.aliases.get(account.id)
+            if widget is None:
+                continue
+            name = widget.get_text().strip()
+            if name == self.alias_was.get(account.id, ""):
+                continue                       # untouched
+            if account.id in by_id:
+                by_id[account.id]["label"] = name
+            else:
+                entries.append({"id": account.id, "label": name,
+                                "dir": _tilde(account.claude_dir)})
+        if entries:
+            cfg["accounts"] = entries
 
     @staticmethod
     def _open(path) -> None:
