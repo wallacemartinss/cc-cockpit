@@ -106,6 +106,16 @@ def _setup(args) -> int:
             where = _tilde(sl.settings_file(account))
             print(f"statusline: {where}: {sl.install(account=account)}")
 
+    # someone with a second account will not guess that it needs registering
+    configured = {str(a.claude_dir) for a in accounts.listed()}
+    unlisted = [p for p in accounts.discover() if str(p) not in configured]
+    if unlisted:
+        print(f"accounts: {t('acct_found_unlisted', n=len(unlisted))}")
+        for path in unlisted:
+            who = accounts.suggest_label(path)
+            print(f"          {_tilde(path)}" + (f"  · {who}" if who else ""))
+        print("          cc-cockpit accounts --detect")
+
     ok, missing = desktop.tray_available()
     if ok:
         print("tray: ready")
@@ -130,6 +140,9 @@ def _accounts_cmd(args, cfg: dict) -> int:
         known = {str(a.claude_dir) for a in accounts.listed(cfg)} if entries else set()
         found = accounts.discover()
         print(t("acct_detected", n=len(found)))
+        for path, how in found.items():
+            who = accounts.suggest_label(path)
+            print(f"    {_tilde(path)}  ({how})" + (f"  · {who}" if who else ""))
         added = []
         for path in found:
             if str(path) in known:
@@ -137,7 +150,8 @@ def _accounts_cmd(args, cfg: dict) -> int:
             account_id = accounts.suggest_id(path)
             while any(e.get("id") == account_id for e in entries):
                 account_id += "2"
-            entries.append({"id": account_id, "label": account_id.title(),
+            entries.append({"id": account_id,
+                            "label": accounts.suggest_label(path) or account_id.title(),
                             "dir": _tilde(path)})
             added.append((account_id, path))
         if added:
@@ -146,6 +160,13 @@ def _accounts_cmd(args, cfg: dict) -> int:
             changed = True
         else:
             print("  " + t("acct_none_new"))
+        # a second account often lives somewhere none of this reaches, and a bare
+        # "nothing new" leaves the person with no idea why theirs is missing
+        print("\n  " + t("acct_searched"))
+        for pattern in accounts.SEARCH_GLOBS:
+            print(f"    {pattern}")
+        print("    $CLAUDE_CONFIG_DIR, and the same variable in any running Claude Code")
+        print("\n  " + t("acct_add_hint"))
 
     if args.rename:
         for spec in args.rename:

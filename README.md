@@ -160,11 +160,23 @@ are two subscriptions, not two folders. Each has **its own 5h and 7d windows**,
 so cc-cockpit keeps them apart everywhere: separate history, separate rate-limit
 snapshot, separate calibration.
 
+Accounts are **not** picked up on their own — a stray copy of a Claude Code
+directory is not a second subscription, and adding it silently would be worse
+than asking. What the tool does instead is say what it found: `setup` and the
+Settings *Accounts* tab both list any directory that is not set up as an
+account, next to the button that adds it.
+
 ```bash
-cc-cockpit accounts --detect          # finds ~/.claude* and registers them
+cc-cockpit accounts --detect          # register what it found, and say where it looked
 cc-cockpit accounts --primary empresa # whose number the tray label shows
 cc-cockpit setup                      # re-registers the statusline in each one
 ```
+
+Detection looks at `~/.claude*`, `~/.config/claude*`, `$CLAUDE_CONFIG_DIR`, and
+that same variable inside any Claude Code running right now — which is how it
+finds an account kept somewhere the globs would never reach. Anything else:
+`cc-cockpit accounts --add work=/path/to/its/dir`, or **Add directory…** in the
+Settings *Accounts* tab.
 
 **That last step is the one that matters.** The statusline payload carries the
 account's rate limits but nothing that identifies the account, so each

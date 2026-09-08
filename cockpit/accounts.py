@@ -20,6 +20,7 @@ Only money aggregates across accounts - see stats.combined().
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 from dataclasses import dataclass
@@ -149,17 +150,109 @@ def is_multi(cfg: dict | None = None) -> bool:
     return len(listed(cfg)) > 1
 
 
-def discover() -> list[Path]:
-    """Directories that look like a Claude Code home, for `accounts --detect`."""
-    home = Path.home()
-    out = []
-    for path in sorted(home.glob(".claude*")):
-        if path.is_dir() and ((path / "projects").is_dir() or (path / "sessions").is_dir()):
-            out.append(path)
-    extra = default_claude_dir()
-    if extra.is_dir() and extra not in out:
-        out.insert(0, extra)
+def looks_like_claude_home(path: Path) -> bool:
+    return path.is_dir() and any((path / n).exists()
+                                 for n in ("projects", "sessions", ".claude.json",
+                                           "settings.json", ".credentials.json"))
+
+
+def running_config_dirs() -> list[Path]:
+    """CLAUDE_CONFIG_DIR of the Claude Code processes running right now.
+
+    Globbing the home directory only finds an account that lives where we
+    guessed. A second account is often somewhere else entirely, pointed at by
+    CLAUDE_CONFIG_DIR in the shell that starts it - and the tray, launched by
+    autostart, never sees that shell's environment. The process itself does,
+    and /proc will say so.
+    """
+    found: list[Path] = []
+    try:
+        pids = [int(p.name) for p in Path("/proc").iterdir() if p.name.isdigit()]
+    except OSError:
+        return found
+    for pid in pids:
+        try:
+            comm = (Path(f"/proc/{pid}/comm").read_text().strip())
+            if "claude" not in comm and "node" not in comm:
+                continue
+            raw = Path(f"/proc/{pid}/environ").read_bytes()
+        except OSError:
+            continue
+        for entry in raw.split(b"\0"):
+            if entry.startswith(b"CLAUDE_CONFIG_DIR="):
+                path = Path(entry.split(b"=", 1)[1].decode(errors="replace")).expanduser()
+                if path not in found and looks_like_claude_home(path):
+                    found.append(path)
+    return found
+
+
+# where discover() looks, so `--detect` can say what it searched rather than
+# leaving someone staring at a list with their other account missing from it
+SEARCH_GLOBS = ("~/.claude*", "~/.config/claude*")
+
+
+def discover() -> dict[Path, str]:
+    """Claude Code homes on this machine, mapped to how each was found."""
+    out: dict[Path, str] = {}
+
+    default = default_claude_dir()
+    if looks_like_claude_home(default):
+        out[default] = "CLAUDE_CONFIG_DIR" if os.environ.get("CLAUDE_CONFIG_DIR") else "default"
+
+    for pattern in SEARCH_GLOBS:
+        base = Path(pattern).expanduser()
+        for path in sorted(base.parent.glob(base.name)):
+            if path not in out and looks_like_claude_home(path):
+                out[path] = pattern
+
+    for path in running_config_dirs():
+        if path not in out:
+            out[path] = "a running Claude Code"
     return out
+
+
+def identity(claude_dir: Path) -> dict:
+    """Who is logged in to this directory, from Claude Code's own record.
+
+    ~/.claude.json carries one `oauthAccount` - singular, one login per config
+    directory, which is what makes a directory the right unit for an account.
+    It is also the only thing that can tell a company account from a personal
+    one without asking the person which is which.
+    """
+    # With the default home the file sits beside the directory (~/.claude.json,
+    # next to ~/.claude/); a directory named by CLAUDE_CONFIG_DIR keeps its own
+    # inside. Try both rather than assume which layout this install uses.
+    candidates = (claude_dir / ".claude.json",
+                  claude_dir.parent / f"{claude_dir.name}.json")
+    raw = None
+    for candidate in candidates:
+        try:
+            raw = json.loads(candidate.read_text())
+            break
+        except (OSError, ValueError):
+            continue
+    if raw is None:
+        return {}
+    account = raw.get("oauthAccount")
+    if not isinstance(account, dict):
+        return {}
+    return {k: account.get(k) for k in
+            ("displayName", "fullName", "organizationName", "organizationType",
+             "organizationRole", "emailAddress")}
+
+
+def suggest_label(claude_dir: Path) -> str:
+    """A readable name for a directory: the organisation, or whoever is logged in.
+
+    Anthropic names a personal organisation after the account's own email
+    ("someone@example.com's Organization"), which is noise on a panel; a company
+    account has a real name there, and that is exactly the one worth showing.
+    """
+    who = identity(claude_dir)
+    org = (who.get("organizationName") or "").strip()
+    if org and "'s Organization" not in org:
+        return org
+    return (who.get("displayName") or who.get("fullName") or "").strip()
 
 
 def suggest_id(path: Path) -> str:

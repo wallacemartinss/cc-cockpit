@@ -10,6 +10,7 @@ simply unreachable on a short display with no way to scroll to them.
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 
 import gi
 
@@ -24,7 +25,6 @@ SPACING = 8
 
 
 def _tilde(path) -> str:
-    from pathlib import Path
     text, home = str(path), str(Path.home())
     return "~" + text[len(home):] if text.startswith(home) else text
 
@@ -90,30 +90,14 @@ class Preferences(Gtk.Window):
         # The name is editable here; the id is not. An id names accounts/<id>/,
         # which holds months Claude Code has already pruned, so changing it has
         # to move a directory - that lives in `cc-cockpit accounts --rename`,
-        # not behind a Save button.
+        # not behind a Save button. Adding and removing, on the other hand,
+        # belong here: someone with a second account opens this tab to point at
+        # it, and used to find only a sentence telling them to go to a terminal.
         self.primary = None
         self.aliases: dict[str, Gtk.Entry] = {}
         self.alias_was: dict[str, str] = {}
-        found = accounts.listed(self.cfg)
-        who = self._section(self._page(t("accounts")), "", hint=t("accounts_hint"))
-        for row, account in enumerate(found):
-            entry = self._entry(who, row, account.id, account.label or account.id)
-            entry.set_placeholder_text(account.id)
-            entry.set_tooltip_text(str(account.claude_dir))
-            if not account.exists():
-                entry.set_icon_from_icon_name(Gtk.EntryIconPosition.SECONDARY,
-                                              "dialog-warning-symbolic")
-                entry.set_icon_tooltip_text(Gtk.EntryIconPosition.SECONDARY,
-                                            f"{t('acct_missing')}: {account.claude_dir}")
-            self.aliases[account.id] = entry
-            # what the field started with, so "changed" means the user typed -
-            # an implicit account shows its id and must not be written back
-            # just because someone opened the window and pressed Save
-            self.alias_was[account.id] = entry.get_text()
-        if len(found) > 1:
-            self.primary = self._combo(
-                who, len(found), t("panel_account"), "primary_account",
-                [(a.id, a.title) for a in found])
+        self.accounts_box = self._page(t("accounts"))
+        self._fill_accounts()
 
         limits_page = self._page(t("tab_limits"))
         limits = self._section(limits_page, t("ceilings"), hint=t("ceilings_hint"))
@@ -153,6 +137,127 @@ class Preferences(Gtk.Window):
         save.get_style_context().add_class("suggested-action")
         save.connect("clicked", self._save)
         buttons.pack_end(save, False, False, 0)
+
+    # ---------- accounts ----------
+    def _fill_accounts(self) -> None:
+        """(Re)builds the tab, because add and remove change its shape."""
+        for child in self.accounts_box.get_children():
+            self.accounts_box.remove(child)
+        self.aliases, self.alias_was = {}, {}
+
+        found = accounts.listed(self.cfg)
+        grid = self._section(self.accounts_box, "", hint=t("accounts_hint"))
+        for row, account in enumerate(found):
+            entry = self._entry(grid, row, account.id, account.label or account.id)
+            entry.set_placeholder_text(account.id)
+            entry.set_tooltip_text(str(account.claude_dir))
+            if not account.exists():
+                entry.set_icon_from_icon_name(Gtk.EntryIconPosition.SECONDARY,
+                                              "dialog-warning-symbolic")
+                entry.set_icon_tooltip_text(Gtk.EntryIconPosition.SECONDARY,
+                                            f"{t('acct_missing')}: {account.claude_dir}")
+            self.aliases[account.id] = entry
+            # what the field started with, so "changed" means the user typed
+            self.alias_was[account.id] = entry.get_text()
+            drop = Gtk.Button.new_from_icon_name("list-remove-symbolic", Gtk.IconSize.BUTTON)
+            drop.set_relief(Gtk.ReliefStyle.NONE)
+            drop.set_tooltip_text(t("acct_remove"))
+            drop.connect("clicked", self._remove_account, account.id)
+            grid.attach(drop, 2, row, 1, 1)
+
+        if len(found) > 1:
+            self.primary = self._combo(
+                grid, len(found), t("panel_account"), "primary_account",
+                [(a.id, a.title) for a in found],
+                current=accounts.primary(self.cfg).id)
+        else:
+            self.primary = None
+
+        # Directories on disk that nobody configured. Nothing is added behind
+        # the user's back - a stray copy is not an account - but leaving them
+        # unmentioned is how someone ends up staring at one account wondering
+        # where the other went.
+        configured = {str(a.claude_dir) for a in found}
+        missing = [(path, accounts.suggest_label(path))
+                   for path in accounts.discover() if str(path) not in configured]
+        if missing:
+            note = Gtk.Label(halign=Gtk.Align.START, wrap=True, xalign=0, margin_top=6)
+            lines = "\n".join(f"  {_tilde(path)}" + (f"  · {who}" if who else "")
+                               for path, who in missing)
+            note.set_markup(
+                f"<b>{GLib_escape(t('acct_found_unlisted', n=len(missing)))}</b>\n"
+                f"<tt>{GLib_escape(lines)}</tt>\n"
+                f"<small>{GLib_escape(t('acct_detect_hint'))}</small>")
+            self.accounts_box.pack_start(note, False, False, 0)
+
+        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACING,
+                          margin_top=4)
+        for label, handler in ((t("acct_detect"), self._detect_accounts),
+                               (t("acct_add"), self._add_account)):
+            button = Gtk.Button(label=label)
+            button.connect("clicked", handler)
+            actions.pack_start(button, False, False, 0)
+        self.accounts_box.pack_start(actions, False, False, 0)
+        self.accounts_box.show_all()
+
+    def _apply_accounts(self, entries: list) -> None:
+        cfg = config.load()
+        self._save_aliases(cfg)          # never lose what was being typed
+        cfg["accounts"] = entries
+        config.save(cfg)
+        self.cfg = cfg
+        for account in accounts.listed(cfg):
+            accounts.rehome(account)     # a renamed default takes its history
+        self._fill_accounts()
+        if self.on_saved:
+            self.on_saved(cfg)           # the tray picks it up without a restart
+
+    def _detect_accounts(self, *_a) -> None:
+        cfg = config.load()
+        entries = list(cfg.get("accounts") or [])
+        known = {str(a.claude_dir) for a in accounts.listed(cfg)} if entries else set()
+        for path in accounts.discover():
+            if str(path) in known:
+                continue
+            entries.append(self._entry_for(path, entries))
+        self._apply_accounts(entries)
+
+    def _add_account(self, *_a) -> None:
+        chooser = Gtk.FileChooserDialog(
+            title=t("acct_pick"), transient_for=self,
+            action=Gtk.FileChooserAction.SELECT_FOLDER)
+        chooser.add_buttons(t("close"), Gtk.ResponseType.CANCEL,
+                            t("acct_add"), Gtk.ResponseType.OK)
+        chooser.set_current_folder(str(Path.home()))
+        chooser.set_show_hidden(True)         # a Claude home starts with a dot
+        picked = chooser.get_filename() if chooser.run() == Gtk.ResponseType.OK else None
+        chooser.destroy()
+        if not picked:
+            return
+        cfg = config.load()
+        entries = list(cfg.get("accounts") or [])
+        if not entries:                       # materialise the implicit one first
+            current = accounts.primary(cfg)
+            entries.append({"id": current.id, "label": current.label,
+                            "dir": _tilde(current.claude_dir)})
+        if any(str(Path(e.get("dir", "")).expanduser()) == picked for e in entries):
+            return                            # already there
+        entries.append(self._entry_for(Path(picked), entries))
+        self._apply_accounts(entries)
+
+    @staticmethod
+    def _entry_for(path, entries: list) -> dict:
+        account_id = accounts.suggest_id(path)
+        while any(e.get("id") == account_id for e in entries):
+            account_id += "2"
+        return {"id": account_id,
+                "label": accounts.suggest_label(path) or account_id.title(),
+                "dir": _tilde(path)}
+
+    def _remove_account(self, _button, account_id: str) -> None:
+        cfg = config.load()
+        entries = [e for e in (cfg.get("accounts") or []) if e.get("id") != account_id]
+        self._apply_accounts(entries)
 
     # ---------- building blocks ----------
     def _page(self, title: str) -> Gtk.Box:
