@@ -47,6 +47,13 @@ def report(cfg: dict, s: dict | None = None) -> None:
         shown = f"{pct:5.1f}%" if pct is not None else "     "
         print(f"  {label:<{label_width}} {_bar(pct)} {shown}  {_money(d['usd']):>12}   {extra}")
 
+    login = s.get("login")
+    if login:
+        mark = {"ok": "", "warn": "\033[33m", "crit": "\033[31m"}.get(login["state"], "")
+        text = t("login_expired") if login["expired"] \
+            else t("login_expires", d=_dur(login["remaining_s"]))
+        print(f"\n  {mark}{text}\033[0m")
+
     print(f"\n  \033[1m{t('cli_sessions')}\033[0m")
     if s["sessions"]:
         for x in s["sessions"]:

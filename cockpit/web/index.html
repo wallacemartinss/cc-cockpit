@@ -83,6 +83,7 @@
     <h1>cc<span>·</span>cockpit</h1>
     <span class="pill" id="plan">—</span>
     <span class="pill" id="live">—</span>
+    <span class="pill" id="login" hidden></span>
     <span class="sub" id="upd" style="margin-left:auto"></span>
   </header>
 
@@ -262,6 +263,18 @@ async function tick(){
     ? esc(t('plan_roi', {name: s.plan.name||'—', roi: s.plan.roi||0}))
     : `${esc(t('month_equivalent'))} <b>${money(tt.month.usd)}</b>${local(tt.month.usd)}`;
   $('#live').textContent = t('sessions_open', {n: s.sessions.length});
+
+  // the login is per account; the combined tab carries one per account instead
+  const logins = s.login ? [{label: null, login: s.login}]
+    : (s.per_account || []).filter(g => g.login).map(g => ({label: g.label, login: g.login}));
+  const pill = $('#login');
+  pill.hidden = !logins.length;
+  pill.innerHTML = logins.map(({label, login}) => {
+    const text = login.expired ? t('login_expired')
+      : t('login_expires', {d: dur(login.remaining_s)});
+    const col = {ok:'var(--muted)', warn:'var(--warn)', crit:'var(--crit)'}[login.state];
+    return `<span style="color:${col}">${label ? esc(label) + ': ' : ''}${esc(text)}</span>`;
+  }).join(' · ');
   $('#upd').textContent = t('updated',
     {time: new Date(s.generated_at*1000).toLocaleTimeString(LOCALE)});
 

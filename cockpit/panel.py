@@ -8,7 +8,7 @@ and it carries the real subscription windows:
       "seven_day": {"used_percentage": number, "resets_at": epoch}
     }
 
-Reading it here means no credentials, no undocumented endpoint and no guessing:
+Reading it here means no token, no undocumented endpoint and no guessing:
 these are the same numbers the plan panel shows, including whatever was consumed
 in the Claude app, which never touches the local transcripts.
 

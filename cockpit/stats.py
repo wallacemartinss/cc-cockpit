@@ -6,7 +6,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from . import accounts, anchors, calibration, config, i18n, panel
+from . import accounts, anchors, auth, calibration, config, i18n, panel
 from .accounts import Account
 from .collector import Event, load_events, refresh
 from .sessions import live_sessions
@@ -313,6 +313,7 @@ def summary(events: list[Event] | None = None, cfg: dict | None = None,
     return {
         "generated_at": now,
         "account": acct.as_dict(),
+        "login": auth.status(acct, now),
         "block_hours": block_hours,
         "totals": {k: v.as_dict() for k, v in totals.items()},
         "today_gauge": {**totals["today"].as_dict(), **_gauge(totals["today"].usd, lim_day)},
@@ -385,11 +386,14 @@ def combined(cfg: dict | None = None, parts: list[dict] | None = None) -> dict:
     out = summary(events=merged, cfg=cfg, account=ghost)
 
     gauges = [{"account": p["account"]["id"], "label": p["account"]["label"],
-               "block": p["block"], "week": p["week"]} for p in parts]
+               "block": p["block"], "week": p["week"], "login": p.get("login")}
+              for p in parts]
     for window in ("block", "week"):
         out[window] = {**out[window], "pct": None, "limit": None,
                        "window_source": "combined", "per_account": gauges}
     out["account"] = {"id": ALL_ID, "label": t_all(), "dir": "", "exists": True}
+    # a login belongs to one account; the combined view carries them per account
+    out["login"] = None
     out["per_account"] = gauges
     # each part already resolved its own sessions, with the right usage attached
     out["sessions"] = [s for p in parts for s in p["sessions"]]

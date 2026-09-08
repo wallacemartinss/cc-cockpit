@@ -56,6 +56,12 @@ def _bar(pct: float | None, width: int, style: str, state: str = "ok") -> str:
     return bars.render(pct, width, style, state)
 
 
+def _login_line(login: dict) -> str:
+    if login["expired"]:
+        return t("login_expired")
+    return t("login_expires", d=_dur(login["remaining_s"]))
+
+
 @dataclass(frozen=True)
 class Row:
     """One menu line, described before any widget exists.
@@ -218,6 +224,10 @@ class Tray:
             rows += self._window_rows(part, style, width, th,
                                       detail=len(parts) == 1
                                       or part["account"]["id"] == primary_id)
+            login = part.get("login")
+            if login:
+                rows.append(Row("row", _login_line(login),
+                                icon.dot(login["state"], 22)))
             rows.append(Row("sep"))
 
         # --- day, month, cache ---

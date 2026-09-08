@@ -9,7 +9,12 @@ a local dashboard and a terminal summary.
 
 Everything is read from what Claude Code already writes under `~/.claude` — or
 under each account's directory, if you run more than one. It makes no network
-calls, reads no credentials and sends nothing anywhere.
+calls and sends nothing anywhere.
+
+One exception is worth stating plainly: to tell you when your login expires it
+opens `.credentials.json` and reads exactly two fields — the refresh-token
+expiry and the plan name. The tokens sitting beside them are never read, never
+stored and never printed. See [`cockpit/auth.py`](cockpit/auth.py).
 
 The interface follows your OS language — English, Portuguese and Spanish are
 bundled — and can be pinned in the config file or with `--lang`.
@@ -25,6 +30,7 @@ bundled — and can be pinned in the config file or with `--lang`.
 | **Blocks, days and hours** | time series showing when you actually spend |
 | **Token mix** | input / output / cache write 5m / cache write 1h / cache read, with the cache hit rate |
 | **Models, effort and subagents** | where the consumption really goes |
+| **Login** | how long until you have to sign in again — the refresh token's expiry, not the access token's, which the CLI renews by itself every few hours |
 
 Usage is measured in **API-equivalent USD**: what those messages would cost on
 the pay-as-you-go API. On a Pro/Max plan none of it is billed — the number works
@@ -241,7 +247,7 @@ and it carries exactly what the plan panel shows:
 }
 ```
 
-Register the capture once — no credentials, no undocumented endpoint:
+Register the capture once — no undocumented endpoint, no token:
 
 ```bash
 cc-cockpit statusline --install
@@ -304,6 +310,10 @@ and each configured account otherwise.
   belong to one subscription and are never mixed.
 - `terminal.py` knows twelve terminal emulators and what each wants, so a
   session can be reopened where it lives.
+- `auth.py` reads two fields out of `.credentials.json` and nothing else. The
+  access-token expiry sitting next to them is deliberately ignored: the CLI
+  refreshes it by itself every few hours, so showing it would announce an expiry
+  that never happens.
 
 ## Honest limitations
 

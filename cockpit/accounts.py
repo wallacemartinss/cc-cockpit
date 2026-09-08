@@ -61,6 +61,11 @@ class Account:
     def settings_file(self) -> Path:
         return self.claude_dir / "settings.json"
 
+    @property
+    def credentials_file(self) -> Path:
+        """Read only for the login expiry - see auth.py."""
+        return self.claude_dir / ".credentials.json"
+
     # ---- what cc-cockpit writes ----
     @property
     def data_dir(self) -> Path:

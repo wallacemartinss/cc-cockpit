@@ -57,7 +57,8 @@ Homepage: https://github.com/wallacemartinss/cc-cockpit
 Description: Claude Code usage panel for Linux desktops
  Tray indicator with a live rate-limit ring, a local dashboard and a terminal
  summary for Claude Code usage. Reads the official limits from the statusline
- payload, so it needs no credentials and makes no network calls.
+ payload, so it makes no network calls. It reads the login expiry from the
+ credentials file and nothing else from it - never the tokens.
  .
  The indicator is a StatusNotifierItem, so it works on any panel that hosts one:
  GNOME with the AppIndicator extension, XFCE 4.16+ with Status Tray Items, KDE
