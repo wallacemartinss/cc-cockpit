@@ -285,7 +285,7 @@ async function tick(){
   } else
   $('#gauges').innerHTML = [
     [t('block_of',{h:s.block_hours.toFixed(0)}), b,
-      b.active ? t('resets_in',{d:dur(b.remaining_s)}) : t('no_activity')],
+      b.remaining_s ? t('resets_in',{d:dur(b.remaining_s)}) : t('no_activity')],
     [w.window_source==='anchored' ? t('week_window') : t('days7'), w,
       w.remaining_s ? t('resets_in',{d:dur(w.remaining_s)})
                     : `${nf().format(w.requests)} ${t('requests')}`],
@@ -300,10 +300,13 @@ async function tick(){
           d.limit_source?' · '+esc(t('src_'+d.limit_source)):''}</div>`:''}
       </div></div></div>`).join('');
 
+  // an open window with nothing spent in it makes pace and projection zero;
+  // a dash says "nothing yet", where "$0.00/h" reads like a measurement
+  const spent = b.requests > 0;
   $('#kpis').innerHTML = [
-    [money(b.burn_usd_per_h)+'/h', t('kpi_pace')],
-    [b.active?money(b.projected_usd):'—', t('kpi_projection')],
-    [(b.eta_limit_s!=null && b.active)?dur(b.eta_limit_s):'—', t('kpi_eta')],
+    [spent?money(b.burn_usd_per_h)+'/h':'—', t('kpi_pace')],
+    [(spent && b.active)?money(b.projected_usd):'—', t('kpi_projection')],
+    [(spent && b.eta_limit_s!=null && b.active)?dur(b.eta_limit_s):'—', t('kpi_eta')],
     [tt.last_7d.cache_hit_pct+'%', t('kpi_cache')],
   ].map(([v,l])=>`<div class="card kpi"><div class="v mono">${v}</div><div class="l">${esc(l)}</div></div>`).join('');
 

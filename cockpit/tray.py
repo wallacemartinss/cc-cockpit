@@ -45,6 +45,7 @@ from .i18n import money as _money  # noqa: E402
 from .i18n import t  # noqa: E402
 from .i18n import tokens as _toks  # noqa: E402
 from .i18n import use as use_language  # noqa: E402
+from .i18n import window_tail  # noqa: E402
 
 APP_ID = "cc-cockpit"
 
@@ -269,7 +270,9 @@ class Tray:
         titles = (t("block_of", h=f"{part['block_hours']:.0f}"),
                   t("week_window") if w.get("window_source") in ("official", "anchored")
                   else t("days7"))
-        for info, title in zip((b, w), titles):
+        for index, (info, title) in enumerate(zip((b, w), titles)):
+            if index:
+                self._sep()          # the two windows are separate readings
             pct = info.get("pct")
             state = icon.state_for(pct, th["warn"], th["critical"])
             head = f"{title}   {pct:.0f}%" if pct is not None else title
@@ -277,15 +280,7 @@ class Tray:
             self._row(f"{_bar(pct, width, style, state)}   {_money(info['usd'])}")
             if not detail:
                 continue
-            tail = []
-            if info.get("remaining_s"):
-                tail.append(t("resets_in", d=_dur(info["remaining_s"])))
-            if info is b and b["active"]:
-                tail.append(t("pace", v=_money(b["burn_usd_per_h"])))
-                tail.append(t("projection", v=_money(b["projected_usd"])))
-            else:
-                tail.append(_toks(info["tokens"]))
-            self._row("   " + "  ·  ".join(tail))
+            self._row("   " + window_tail(info, is_block=info is b))
 
     def _actions(self) -> None:
         self._account_picker()

@@ -13,6 +13,7 @@ from .i18n import duration as _dur
 from .i18n import money as _money
 from .i18n import t
 from .i18n import tokens as _toks
+from .i18n import window_tail
 from .stats import summary
 
 
@@ -32,11 +33,8 @@ def report(cfg: dict, s: dict | None = None) -> None:
 
     rows = (
         (t("block_of", h=f"{s['block_hours']:.0f}"), b,
-         " · ".join((t("resets_in", d=_dur(b["remaining_s"])),
-                     t("pace", v=_money(b["burn_usd_per_h"])),
-                     t("projection", v=_money(b["projected_usd"]))))
-         if b["active"] else t("no_activity")),
-        (t("days7"), w, t("tokens_requests", tok=_toks(w["tokens"]), n=w["requests"])),
+         window_tail(b, is_block=True, sep=" · ")),
+        (t("days7"), w, window_tail(w, sep=" · ")),
         (t("today"), s["today_gauge"], t("cache_hit_7d", p=f"{tot['last_7d']['cache_hit_pct']:.0f}")),
         (t("month"), {**tot["month"], "pct": None},
          t("tokens_requests", tok=_toks(tot["month"]["tokens"]), n=tot["month"]["requests"])),

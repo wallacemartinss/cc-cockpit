@@ -3,6 +3,9 @@
 One catalogue feeds all three surfaces (tray, CLI and dashboard), so a string
 is written once. The language follows the OS by default and can be pinned in
 the config file.
+
+window_tail() is here for the same reason: the rule for when a rate-limit line
+has anything worth printing was written three times and drifted.
 """
 from __future__ import annotations
 
@@ -470,3 +473,28 @@ def duration(seconds: float) -> str:
     if h:
         return f"{h}h{m:02d}"
     return f"{m}min"
+
+
+def window_tail(info: dict, is_block: bool = False, sep: str = "  ·  ") -> str:
+    """The detail line for a rate-limit window: resets, pace, projection.
+
+    A window can be open with nothing spent in it. The reset time is official
+    and arrives whether or not anything ran, but pace and projection are then
+    both zero, and "$0.00/h · projection $0.00" says less than nothing - as does
+    a token count that renders as a line reading just "0". So the numbers only
+    show up once there is something to count, and a window with neither a reset
+    nor any activity says so in words.
+    """
+    parts = []
+    if info.get("remaining_s"):
+        parts.append(t("resets_in", d=duration(info["remaining_s"])))
+    if info.get("requests"):
+        if is_block and info.get("active"):
+            parts.append(t("pace", v=money(info["burn_usd_per_h"])))
+            parts.append(t("projection", v=money(info["projected_usd"])))
+        else:
+            parts.append(t("tokens_requests", tok=tokens(info["tokens"]),
+                           n=info["requests"]))
+    elif not parts:
+        parts.append(t("no_activity"))
+    return sep.join(parts)
