@@ -7,8 +7,9 @@
 A Claude Code usage panel for Linux: a tray indicator with a consumption ring,
 a local dashboard and a terminal summary.
 
-Everything is read from what Claude Code already writes under `~/.claude`. It
-makes no network calls, reads no credentials and sends nothing anywhere.
+Everything is read from what Claude Code already writes under `~/.claude` — or
+under each account's directory, if you run more than one. It makes no network
+calls, reads no credentials and sends nothing anywhere.
 
 The interface follows your OS language — English, Portuguese and Spanish are
 bundled — and can be pinned in the config file or with `--lang`.
@@ -28,6 +29,30 @@ bundled — and can be pinned in the config file or with `--lang`.
 Usage is measured in **API-equivalent USD**: what those messages would cost on
 the pay-as-you-go API. On a Pro/Max plan none of it is billed — the number works
 as a weight unit for consumption and shows how much the plan returns.
+
+## The three surfaces
+
+**The tray menu** is the glance. One section per account with its 5h and 7d
+windows, then the day, the month, the live sessions and today's projects. A
+session expands into its own detail — directory, context window, requests, pid,
+memory — and offers to open a terminal there, resuming that conversation.
+*Shown on the panel* picks which account the label speaks for.
+
+It refreshes every twenty seconds without redrawing. The menu is exported over
+dbusmenu and the panel draws it, so adding or removing an item tears the popup
+down while you are reading it; a refresh that keeps the same shape only rewrites
+the labels that actually changed, and an expanded session stays expanded.
+
+**The dashboard** is the long look: gauges, sixty days of history, the last
+twenty-four hours, projects, blocks, the token mix, models and effort. Open it
+from the tray, or `cc-cockpit serve --open`. With more than one account it grows
+a tab bar — one per account, plus **All accounts**.
+
+**Settings** opens a real window rather than a submenu: a menu has nowhere to
+type a number, and GNOME's appindicator extension flattens submenus to a single
+level anyway. Four tabs — General, Accounts, Limits, Plan — each scrolling on
+its own so nothing falls off a short screen, with Save always reachable below
+them. Saving applies right away, without a restart.
 
 ## Install
 
@@ -105,34 +130,47 @@ snapshot, separate calibration.
 
 ```bash
 cc-cockpit accounts --detect          # finds ~/.claude* and registers them
-cc-cockpit accounts --label default=Empresa   # the name shown everywhere
-cc-cockpit accounts --rename default=empresa  # the id, moving its history along
 cc-cockpit accounts --primary empresa # whose number the tray label shows
 cc-cockpit setup                      # re-registers the statusline in each one
 ```
 
-The tray menu shows one section per account, and **Shown on the panel** in it
-switches which account the label speaks for without opening Settings.
+**That last step is the one that matters.** The statusline payload carries the
+account's rate limits but nothing that identifies the account, so each
+`settings.json` gets `cc-cockpit statusline --account <id>`. Without it,
+whichever CLI renders last overwrites the other's percentage, and the tray
+reports the wrong subscription with nothing on screen to reveal the swap.
 
-The Settings *Accounts* tab is where each name is edited —
-that is the name the tray, the tabs and the report use. The **id** is not
-editable there: it names `accounts/<id>/`, which holds months Claude Code has
-already pruned, so changing it has to move a directory. That is what
-`--rename` does, and it fixes up the statusline registrations too.
+### What changes where
 
-That last step matters. The statusline payload carries the account's rate limits
-but nothing that identifies the account, so each `settings.json` gets
-`cc-cockpit statusline --account <id>`. Without it, whichever CLI renders last
-overwrites the other's percentage and the tray reports the wrong subscription.
+The **tray label** speaks for the primary account, and the ring takes the colour
+of whichever account is **worst off** — a 95% on the one you are not watching
+still turns the icon red. The menu gains one section per account and a *Shown on
+the panel* submenu to switch between them.
 
-The tray label speaks for the primary account, and the ring takes the colour of
-whichever account is **worst off** — a 95% on the one you are not watching still
-turns the icon red. The dashboard gets a tab per account plus **All accounts**,
-which adds up spend, tokens, projects and models, and deliberately shows one
-ring per account instead of a combined percentage: two windows with different
-ceilings and different resets have no meaningful sum.
+The **dashboard** gains a tab per account, plus **All accounts**. That tab adds
+up spend, tokens, projects and models, and deliberately shows one ring per
+account instead of a combined percentage: two windows with different ceilings
+and different resets have no meaningful sum.
 
-Accounts live in the config file, so they can also be edited by hand:
+### Naming them
+
+Detection names an account after its directory, so `~/.claude` becomes
+`default` — a poor label for what is usually the company account. There are two
+different things to rename, and they carry different risk:
+
+```bash
+cc-cockpit accounts --label default=Empresa   # the name shown everywhere
+cc-cockpit accounts --rename default=empresa  # the id, moving its history along
+```
+
+The **name** is editable in the Settings *Accounts* tab too. The **id** is not,
+because it names `accounts/<id>/`, which holds months Claude Code has already
+pruned; changing it has to move a directory, so it lives in `--rename`, which
+also fixes up the statusline registrations.
+
+### By hand
+
+Accounts live in the config file:
 
 ```jsonc
 "accounts": [
@@ -148,13 +186,7 @@ With nothing configured, everything behaves exactly as before, against
 
 ## Configuration
 
-**Settings** in the tray menu opens a proper window — a menu has nowhere to
-type a number, and GNOME's appindicator extension flattens submenus to a single
-level anyway. It is split into **General**, **Accounts**, **Limits** and
-**Plan**, each tab scrolling on its own so nothing falls off a short screen, and
-Save stays reachable below them. Saving applies right away, without a restart.
-
-Everything lives in `~/.config/cc-cockpit/config.json`, and any key missing from
+Everything the **Settings** window writes lives in `~/.config/cc-cockpit/config.json`, and any key missing from
 the file is written back on start, so new options show up there:
 
 ```jsonc
@@ -229,12 +261,15 @@ Both the tray and the dashboard say which source is in use.
 ## How it works
 
 ```
-~/.claude/projects/**/*.jsonl   transcripts (usage per request)
-~/.claude/sessions/*.json       one entry per live CLI       ─┐
+<account>/projects/**/*.jsonl   transcripts (usage per request)
+<account>/sessions/*.json       one entry per live CLI       ─┐
 statusline payload (stdin)      official rate limits + context ├─> cockpit/
-      ~/.local/share/cc-cockpit/events.ndjson  <───────────────┘
-      ~/.local/share/cc-cockpit/panel.json     official snapshot
+   ~/.local/share/cc-cockpit/accounts/<id>/events.ndjson <────┘
+   ~/.local/share/cc-cockpit/accounts/<id>/panel.json    official snapshot
 ```
+
+`<account>` is `CLAUDE_CONFIG_DIR` or `~/.claude` when nothing is configured,
+and each configured account otherwise.
 
 - `collector.py` reads each transcript **from the last offset**, so a refresh
   costs ~30 ms even with 190 MB of history.
@@ -252,6 +287,11 @@ statusline payload (stdin)      official rate limits + context ├─> cockpit/
   and currency formatting.
 - `panel.py` keeps the official snapshot and appends a line to
   `panel-history.ndjson` whenever the percentage changes.
+- `accounts.py` owns the roster and hands every stateful module its directory.
+  Only money is ever added across accounts — rate limits, ceilings and anchors
+  belong to one subscription and are never mixed.
+- `terminal.py` knows twelve terminal emulators and what each wants, so a
+  session can be reopened where it lives.
 
 ## Honest limitations
 
@@ -266,6 +306,9 @@ statusline payload (stdin)      official rate limits + context ├─> cockpit/
   `sonnet`, `haiku`, `fable`) until they are added to `pricing.py`.
 - `<synthetic>` rows are responses the CLI generates locally: they show up in
   the request count and cost nothing.
+- Opening a terminal on a session starts a **new** one resuming that
+  conversation; it cannot raise the window the session is already in. Window
+  activation by pid is not available to an ordinary application on Wayland.
 - With several accounts, the **All accounts** view adds up money but never
   percentages: each subscription has its own window, and one combined ring
   would be a number that does not exist anywhere.
