@@ -30,6 +30,15 @@ DEFAULTS: dict = {
     "dashboard_port": 8765,
     "warn_pct": 70,
     "critical_pct": 90,
+    # More than one Claude Code account on this machine. Empty means the single
+    # implicit account at CLAUDE_CONFIG_DIR (or ~/.claude), which is the whole
+    # story for most people. Each entry needs a unique id - it names a directory
+    # under ~/.local/share/cc-cockpit/accounts/ - plus the Claude Code home:
+    #   {"id": "pessoal", "label": "Pessoal", "dir": "~/.claude-pessoal"}
+    # `cc-cockpit accounts --detect` fills this in from what is on disk.
+    "accounts": [],
+    # which account the tray label and a bare command speak for. null = the first
+    "primary_account": None,
 }
 
 

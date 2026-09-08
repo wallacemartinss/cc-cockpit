@@ -61,6 +61,20 @@
   svg{display:block;overflow:visible}
   .lbl{fill:var(--muted);font-size:9.5px}
   footer{margin-top:26px;color:var(--muted);font-size:12px;text-align:center}
+  .tabs{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 16px;border-bottom:1px solid var(--line);
+        padding-bottom:0}
+  .tabs button{appearance:none;background:none;border:0;border-bottom:2px solid transparent;
+        color:var(--muted);font:inherit;font-size:13px;padding:8px 13px 9px;cursor:pointer;
+        border-radius:8px 8px 0 0;margin-bottom:-1px}
+  .tabs button:hover{color:var(--fg);background:var(--panel)}
+  .tabs button[aria-selected="true"]{color:var(--fg);border-bottom-color:var(--accent);font-weight:600}
+  .tabs button .miss{color:var(--crit);margin-left:6px;font-size:11px}
+  .split{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(210px,1fr))}
+  .mini{display:flex;align-items:center;gap:12px;background:var(--panel2);
+        border-radius:10px;padding:10px 12px}
+  .mini .who{font-weight:600;font-size:13px}
+  .mini .amt{font-size:12.5px;color:var(--muted);margin-top:2px}
+  .note{color:var(--muted);font-size:12.5px;margin-top:10px}
 </style>
 </head>
 <body>
@@ -71,6 +85,8 @@
     <span class="pill" id="live">—</span>
     <span class="sub" id="upd" style="margin-left:auto"></span>
   </header>
+
+  <div class="tabs" id="tabs" role="tablist" hidden></div>
 
   <div class="grid g3" id="gauges"></div>
 
@@ -190,8 +206,51 @@ function stacked(b){
       <span class="right mono">${toks(p[1])} · ${(p[1]/tot*100).toFixed(1)}%</span></div>`).join('');
 }
 
+// Which account the page is showing. Kept in localStorage so a refresh, or the
+// tray opening the dashboard again, lands on the tab you were last reading.
+let ACCOUNTS = null, CURRENT = null;
+try { CURRENT = localStorage.getItem('cc-cockpit.account'); } catch(e) {}
+
+function pickAccount(id){
+  CURRENT = id;
+  try { localStorage.setItem('cc-cockpit.account', id); } catch(e) {}
+  safeTick();
+}
+
+function drawTabs(){
+  const box = $('#tabs');
+  if(!ACCOUNTS || !ACCOUNTS.multi){ box.hidden = true; return; }
+  box.hidden = false;
+  const items = ACCOUNTS.accounts.map(a => [a.id, a.label, a.exists])
+    .concat([[ACCOUNTS.all_id, t('all_accounts'), true]]);
+  box.innerHTML = items.map(([id,label,ok]) =>
+    `<button role="tab" data-id="${esc(id)}" aria-selected="${id===CURRENT}">${esc(label)}${
+      ok ? '' : `<span class="miss" title="${esc(t('acct_missing'))}">!</span>`}</button>`).join('');
+  box.querySelectorAll('button').forEach(el =>
+    el.onclick = () => pickAccount(el.dataset.id));
+}
+
+// Rings for every account, side by side. The combined tab uses this instead of
+// one ring: adding percentages from two subscriptions would invent a number,
+// since each window has its own ceiling and its own reset.
+function perAccountGauges(list, th){
+  return `<div class="split">` + list.map(g => {
+    const d = g.block;
+    return `<div class="mini">${ring(d.pct, color(d.pct, th))}
+      <div><div class="who">${esc(g.label)}</div>
+        <div class="amt">${money(d.usd)}</div>
+        <div class="amt">${d.remaining_s ? esc(t('resets_in',{d:dur(d.remaining_s)})) : ''}</div>
+      </div></div>`; }).join('') + `</div>`;
+}
+
 async function tick(){
-  const s = await (await fetch('/api/summary')).json();
+  if(!ACCOUNTS){
+    ACCOUNTS = await (await fetch('/api/accounts')).json();
+    const known = ACCOUNTS.accounts.map(a=>a.id).concat([ACCOUNTS.all_id]);
+    if(!CURRENT || !known.includes(CURRENT)) CURRENT = ACCOUNTS.primary;
+  }
+  const qs = CURRENT ? ('?account=' + encodeURIComponent(CURRENT)) : '';
+  const s = await (await fetch('/api/summary' + qs)).json();
   T = s.i18n.catalog; LOCALE = s.i18n.tag; LOCAL = s.local_currency;
   document.documentElement.lang = s.i18n.language;
   document.querySelectorAll('[data-t]').forEach(el => el.textContent = t(el.dataset.t));
@@ -206,6 +265,24 @@ async function tick(){
   $('#upd').textContent = t('updated',
     {time: new Date(s.generated_at*1000).toLocaleTimeString(LOCALE)});
 
+  drawTabs();
+
+  if(b.window_source === 'combined' && s.per_account){
+    $('#gauges').innerHTML = `<div class="card" style="grid-column:1/-1">
+      <h2>${esc(t('block_of',{h:s.block_hours.toFixed(0)}))}</h2>
+      ${perAccountGauges(s.per_account, th)}
+      <div class="note">${esc(t('combined_note'))}</div></div>`
+      + [[t('today'), s.today_gauge,
+          `${tt.today.requests} ${t('requests')} · ${tt.today.sessions} ${t('sessions')}`],
+         [t('month'), {...tt.month, pct:null, limit:null},
+          `${nf().format(tt.month.requests)} ${t('requests')}`]]
+        .map(([title,d,cap])=>`
+          <div class="card"><h2>${esc(title)}</h2><div class="gauge">
+            ${ring(d.pct, color(d.pct, th))}
+            <div><div class="num">${money(d.usd)}<span class="muted" style="font-size:13px;font-weight:400">${local(d.usd)}</span></div>
+              <div class="cap">${toks(d.tokens)} tokens · ${esc(cap)}</div>
+            </div></div></div>`).join('');
+  } else
   $('#gauges').innerHTML = [
     [t('block_of',{h:s.block_hours.toFixed(0)}), b,
       b.active ? t('resets_in',{d:dur(b.remaining_s)}) : t('no_activity')],
@@ -242,7 +319,8 @@ async function tick(){
     <div class="sess ${x.status}">
       <div style="min-width:0">
         <div class="nm"><span class="dot" style="background:${x.status==='busy'?'var(--ok)':'var(--muted)'}"></span>${esc(x.name)}
-          <span class="tag">${x.status}</span></div>
+          <span class="tag">${x.status}</span>${
+          ACCOUNTS && ACCOUNTS.multi ? `<span class="tag">${esc(x.account_label||x.account)}</span>` : ''}</div>
         <div class="pth">${esc(x.cwd)}</div>
       </div>
       <div class="right"><div class="mono">${money(x.usage.usd)}</div>

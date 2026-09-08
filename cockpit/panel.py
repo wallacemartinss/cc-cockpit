@@ -14,31 +14,47 @@ in the Claude app, which never touches the local transcripts.
 
 The snapshot only refreshes while a CLI session is rendering. That is enough:
 what is not running cannot be consuming, and `resets_at` stays valid on its own.
+
+These numbers belong to one account. With two accounts on the machine a single
+snapshot file would mean the last CLI to render wins, and the tray would show a
+percentage from the wrong subscription with nothing to reveal the swap - so the
+snapshot lives under the account, and `cc-cockpit statusline --account` says
+which one is talking.
 """
 from __future__ import annotations
 
 import json
 import time
-from pathlib import Path
 
-from .collector import DATA_DIR
+from .accounts import Account, primary
 
-SNAPSHOT = DATA_DIR / "panel.json"
-HISTORY = DATA_DIR / "panel-history.ndjson"
 WINDOWS = {"block": "five_hour", "week": "seven_day"}
 
 
-def load() -> dict:
+def _account(account: Account | None) -> Account:
+    return account if account is not None else primary()
+
+
+def snapshot_path(account: Account | None = None):
+    return _account(account).path("panel.json")
+
+
+def history_path(account: Account | None = None):
+    return _account(account).path("panel-history.ndjson")
+
+
+def load(account: Account | None = None) -> dict:
     try:
-        return json.loads(SNAPSHOT.read_text())
+        return json.loads(snapshot_path(account).read_text())
     except (OSError, ValueError):
         return {}
 
 
-def window(name: str, now: float | None = None, snapshot: dict | None = None) -> dict | None:
+def window(name: str, now: float | None = None, snapshot: dict | None = None,
+           account: Account | None = None) -> dict | None:
     """Official data for 'block' or 'week', or None when absent or expired."""
     now = now or time.time()
-    snap = snapshot if snapshot is not None else load()
+    snap = snapshot if snapshot is not None else load(account)
     data = (snap.get("rate_limits") or {}).get(WINDOWS.get(name, name))
     if not data:
         return None
@@ -53,21 +69,22 @@ def window(name: str, now: float | None = None, snapshot: dict | None = None) ->
     }
 
 
-def contexts(snapshot: dict | None = None) -> dict:
-    snap = snapshot if snapshot is not None else load()
+def contexts(snapshot: dict | None = None, account: Account | None = None) -> dict:
+    snap = snapshot if snapshot is not None else load(account)
     return snap.get("sessions") or {}
 
 
-def record(payload: dict) -> dict:
-    """Stores one statusline payload. Returns the merged snapshot."""
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
+def record(payload: dict, account: Account | None = None) -> dict:
+    """Stores one statusline payload for an account. Returns the merged snapshot."""
+    acct = _account(account)
+    acct.data_dir.mkdir(parents=True, exist_ok=True)
     now = time.time()
-    snap = load()
+    snap = load(acct)
     limits = payload.get("rate_limits") or {}
     if limits:
         snap["rate_limits"] = limits
         snap["at"] = now
-        _append_history(now, limits)
+        _append_history(acct, now, limits)
 
     session_id = payload.get("session_id")
     if session_id:
@@ -85,14 +102,16 @@ def record(payload: dict) -> dict:
         cutoff = now - 24 * 3600
         snap["sessions"] = {k: v for k, v in sessions.items() if v.get("at", 0) > cutoff}
 
-    tmp = SNAPSHOT.with_suffix(".tmp")
+    path = snapshot_path(acct)
+    tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(snap))
-    tmp.replace(SNAPSHOT)
+    tmp.replace(path)
     return snap
 
 
-def _append_history(now: float, limits: dict) -> None:
+def _append_history(acct: Account, now: float, limits: dict) -> None:
     """One line per change, so the official curve can be plotted later."""
+    history = history_path(acct)
     row = {"at": round(now, 1)}
     for key, source in WINDOWS.items():
         data = limits.get(source) or {}
@@ -102,7 +121,7 @@ def _append_history(now: float, limits: dict) -> None:
     if len(row) == 1:
         return
     try:
-        with HISTORY.open() as fh:
+        with history.open() as fh:
             last = None
             for line in fh:
                 last = line
@@ -112,5 +131,5 @@ def _append_history(now: float, limits: dict) -> None:
                 return   # nothing changed
     except (OSError, ValueError):
         pass
-    with HISTORY.open("a") as fh:
+    with history.open("a") as fh:
         fh.write(json.dumps(row, separators=(",", ":")) + "\n")

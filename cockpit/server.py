@@ -6,22 +6,33 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
-from . import config
+from . import accounts, config, stats
 from .stats import summary
 
 # inside the package, so it survives a wheel install
 WEB_DIR = Path(__file__).resolve().parent / "web"
-_CACHE: dict = {"at": 0.0, "data": None}
+# one entry per account, plus one for the combined view: a tab switch must not
+# invalidate the tab the user just came from
+_CACHE: dict[str, dict] = {}
 _LOCK = threading.Lock()
 
 
-def cached_summary(max_age: float = 5.0) -> dict:
+def cached_summary(account_id: str | None = None, max_age: float = 5.0) -> dict:
+    cfg = config.load()
+    if account_id in ("all", stats.ALL_ID):
+        key, build = stats.ALL_ID, lambda: stats.combined(cfg)
+    else:
+        account = accounts.resolve(account_id, cfg)   # raises on an unknown id
+        key = account.id
+        build = lambda: summary(cfg=cfg, account=account)   # noqa: E731
     with _LOCK:
-        if _CACHE["data"] is None or time.time() - _CACHE["at"] > max_age:
-            _CACHE["data"] = summary(cfg=config.load())
-            _CACHE["at"] = time.time()
-        return _CACHE["data"]
+        entry = _CACHE.get(key)
+        if entry is None or time.time() - entry["at"] > max_age:
+            entry = {"at": time.time(), "data": build()}
+            _CACHE[key] = entry
+        return entry["data"]
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -39,10 +50,20 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self) -> None:
-        path = self.path.split("?")[0]
+        parsed = urlparse(self.path)
+        path = parsed.path
+        query = parse_qs(parsed.query)
         try:
             if path == "/api/summary":
-                self._send(200, json.dumps(cached_summary()).encode(), "application/json")
+                wanted = (query.get("account") or [None])[0]
+                try:
+                    body = json.dumps(cached_summary(wanted)).encode()
+                except ValueError as exc:      # unknown account id in the query
+                    self._send(404, str(exc).encode(), "text/plain; charset=utf-8")
+                    return
+                self._send(200, body, "application/json")
+            elif path == "/api/accounts":
+                self._send(200, json.dumps(stats.overview()).encode(), "application/json")
             elif path == "/api/config":
                 self._send(200, json.dumps(config.load()).encode(), "application/json")
             elif path in ("/", "/index.html"):

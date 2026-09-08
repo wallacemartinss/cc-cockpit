@@ -2,11 +2,10 @@
 from __future__ import annotations
 
 import math
-from pathlib import Path
 
 import cairo
 
-from .collector import DATA_DIR
+from .accounts import DATA_DIR
 
 ICON_DIR = DATA_DIR / "icons"
 SIZE = 64

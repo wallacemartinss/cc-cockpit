@@ -6,8 +6,9 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from . import anchors, calibration, config, i18n, panel
-from .collector import Event, refresh
+from . import accounts, anchors, calibration, config, i18n, panel
+from .accounts import Account
+from .collector import Event, load_events, refresh
 from .sessions import live_sessions
 
 HOUR = 3600.0
@@ -136,11 +137,19 @@ def _fill_hours(hourly: dict[int, Bucket], now: float) -> list[dict]:
     ]
 
 
-def summary(events: list[Event] | None = None, cfg: dict | None = None) -> dict:
+def summary(events: list[Event] | None = None, cfg: dict | None = None,
+            account: Account | None = None) -> dict:
+    """Everything the tray and the dashboard show, for one account.
+
+    An account is not an optional label here: the rate-limit windows, the
+    calibrated ceilings and the live sessions all belong to a subscription, and
+    none of them survives being averaged with another one's.
+    """
     cfg = cfg or config.load()
     i18n.use(cfg.get("language"))
+    acct = account if account is not None else accounts.primary(cfg)
     if events is None:
-        events, _ = refresh()
+        events, _ = refresh(acct)
     now = time.time()
     block_hours = float(cfg.get("block_hours") or 5)
 
@@ -193,8 +202,9 @@ def summary(events: list[Event] | None = None, cfg: dict | None = None) -> dict:
     # The account-wide window may have opened before the first local request
     # (the Claude app shares the same limit), so a known end wins over the
     # local estimate: official statusline data first, manual anchor second.
-    official_block = panel.window("block", now)
-    end_override = official_block["resets_at"] if official_block else anchors.block_end(now)
+    official_block = panel.window("block", now, account=acct)
+    end_override = (official_block["resets_at"] if official_block
+                    else anchors.block_end(now, account=acct))
     block_source = "official" if official_block else ("anchored" if end_override else "local")
     if end_override:
         start = end_override - block_hours * HOUR
@@ -208,14 +218,14 @@ def summary(events: list[Event] | None = None, cfg: dict | None = None) -> dict:
     # percentage Claude Code reports > the largest value ever observed
     lim_block, src_block = cfg["limits"].get("block_usd"), "manual"
     if not lim_block:
-        lim_block, src_block = calibration.ceiling("block"), "calibrated"
+        lim_block, src_block = calibration.ceiling("block", account=acct), "calibrated"
     if not lim_block:
         lim_block = max((b["bucket"].usd for b in closed), default=0.0)
         src_block = "peak"
 
     lim_week, src_week = cfg["limits"].get("week_usd"), "manual"
     if not lim_week:
-        lim_week, src_week = calibration.ceiling("week"), "calibrated"
+        lim_week, src_week = calibration.ceiling("week", account=acct), "calibrated"
     if not lim_week:
         weeks: dict[str, float] = defaultdict(float)
         for e in events:
@@ -266,12 +276,12 @@ def summary(events: list[Event] | None = None, cfg: dict | None = None) -> dict:
 
     lim_day = max((b.usd for d, b in daily.items() if d != datetime.now().astimezone().strftime("%Y-%m-%d")), default=0.0)
 
-    official_week = panel.window("week", now)
+    official_week = panel.window("week", now, account=acct)
     if official_week:
         w_end = official_week["resets_at"]
         week_window = (w_end - 7 * 24 * HOUR, w_end)
     else:
-        week_window = anchors.week_window(now)
+        week_window = anchors.week_window(now, account=acct)
     if week_window:
         w_start, w_end = week_window
         week = Bucket()
@@ -289,8 +299,8 @@ def summary(events: list[Event] | None = None, cfg: dict | None = None) -> dict:
                  "limit_source": src_week, **week_extra,
                  **_official_gauge(official_week, week)}
 
-    live = live_sessions()
-    contexts = panel.contexts()
+    live = live_sessions(acct)
+    contexts = panel.contexts(account=acct)
     for item in live:
         b = per_session.get(item["session_id"])
         item["usage"] = b.as_dict() if b else Bucket().as_dict()
@@ -302,6 +312,7 @@ def summary(events: list[Event] | None = None, cfg: dict | None = None) -> dict:
 
     return {
         "generated_at": now,
+        "account": acct.as_dict(),
         "block_hours": block_hours,
         "totals": {k: v.as_dict() for k, v in totals.items()},
         "today_gauge": {**totals["today"].as_dict(), **_gauge(totals["today"].usd, lim_day)},
@@ -332,4 +343,70 @@ def summary(events: list[Event] | None = None, cfg: dict | None = None) -> dict:
         "local_currency": cfg.get("local_currency"),
         "i18n": {"language": i18n.language(), "tag": i18n.tag(), "catalog": i18n.catalog()},
         "thresholds": {"warn": cfg.get("warn_pct", 70), "critical": cfg.get("critical_pct", 90)},
+    }
+
+
+# ---------------------------------------------------------------- many accounts
+
+ALL_ID = "__all__"
+
+
+def per_account(cfg: dict | None = None) -> list[dict]:
+    """One summary per configured account, in configured order."""
+    cfg = cfg or config.load()
+    return [summary(cfg=cfg, account=a) for a in accounts.listed(cfg)]
+
+
+def combined(cfg: dict | None = None, parts: list[dict] | None = None) -> dict:
+    """Money across every account, with the rate-limit windows deliberately out.
+
+    Spend, tokens, requests, projects and models are additive and worth seeing
+    together. Percentages are not: each subscription has its own ceiling and its
+    own reset, so a single ring over both would be a number that does not exist.
+    The per-account gauges are passed through untouched instead, for the UI to
+    show side by side, and `window_source` is "combined" so nothing mistakes them.
+    """
+    cfg = cfg or config.load()
+    found = accounts.listed(cfg)
+    parts = parts if parts is not None else per_account(cfg)
+
+    merged: list[Event] = []
+    seen: set[str] = set()
+    for account in found:
+        for event in load_events(account):
+            if event.k not in seen:      # two ids on one directory would double count
+                seen.add(event.k)
+                merged.append(event)
+    merged.sort(key=lambda e: e.t)
+
+    # a ghost account: its data dir does not exist, so no snapshot, anchor or
+    # calibration leaks into a view that must not carry any of them
+    ghost = Account(id=ALL_ID, label=t_all(), claude_dir=accounts.primary(cfg).claude_dir)
+    out = summary(events=merged, cfg=cfg, account=ghost)
+
+    gauges = [{"account": p["account"]["id"], "label": p["account"]["label"],
+               "block": p["block"], "week": p["week"]} for p in parts]
+    for window in ("block", "week"):
+        out[window] = {**out[window], "pct": None, "limit": None,
+                       "window_source": "combined", "per_account": gauges}
+    out["account"] = {"id": ALL_ID, "label": t_all(), "dir": "", "exists": True}
+    out["per_account"] = gauges
+    # each part already resolved its own sessions, with the right usage attached
+    out["sessions"] = [s for p in parts for s in p["sessions"]]
+    return out
+
+
+def t_all() -> str:
+    return i18n.t("all_accounts")
+
+
+def overview(cfg: dict | None = None) -> dict:
+    """What the dashboard needs to draw its tabs, in one round trip."""
+    cfg = cfg or config.load()
+    found = accounts.listed(cfg)
+    return {
+        "multi": len(found) > 1,
+        "primary": accounts.primary(cfg).id,
+        "all_id": ALL_ID,
+        "accounts": [a.as_dict() for a in found],
     }

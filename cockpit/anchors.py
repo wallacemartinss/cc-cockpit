@@ -18,9 +18,8 @@ import json
 import re
 import time
 
-from .collector import DATA_DIR
+from .accounts import Account, primary
 
-FILE = DATA_DIR / "anchors.json"
 WEEK = 7 * 86400.0
 
 _DURATION = re.compile(r"(\d+(?:[.,]\d+)?)\s*([dhms])", re.I)
@@ -43,43 +42,49 @@ def parse_duration(text: str) -> float:
     raise ValueError(f"could not read the duration: {text!r}")
 
 
-def load() -> dict:
+def _file(account: Account | None):
+    return (account if account is not None else primary()).path("anchors.json")
+
+
+def load(account: Account | None = None) -> dict:
     try:
-        return json.loads(FILE.read_text())
+        return json.loads(_file(account).read_text())
     except (OSError, ValueError):
         return {}
 
 
-def save(data: dict) -> None:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    FILE.write_text(json.dumps(data, indent=2))
+def save(data: dict, account: Account | None = None) -> None:
+    path = _file(account)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2))
 
 
-def set_block_end(epoch: float) -> None:
-    data = load()
+def set_block_end(epoch: float, account: Account | None = None) -> None:
+    data = load(account)
     data["block_end"] = epoch
     data["block_set_at"] = time.time()
-    save(data)
+    save(data, account)
 
 
-def set_week_end(epoch: float) -> None:
-    data = load()
+def set_week_end(epoch: float, account: Account | None = None) -> None:
+    data = load(account)
     data["week_end"] = epoch
     data["week_set_at"] = time.time()
-    save(data)
+    save(data, account)
 
 
-def block_end(now: float | None = None) -> float | None:
+def block_end(now: float | None = None, account: Account | None = None) -> float | None:
     """End of the anchored block, or None once it has passed."""
     now = now or time.time()
-    end = load().get("block_end")
+    end = load(account).get("block_end")
     return end if end and end > now else None
 
 
-def week_window(now: float | None = None) -> tuple[float, float] | None:
+def week_window(now: float | None = None,
+                account: Account | None = None) -> tuple[float, float] | None:
     """Current weekly window, rolled forward from the anchored reset."""
     now = now or time.time()
-    end = load().get("week_end")
+    end = load(account).get("week_end")
     if not end:
         return None
     while end <= now:
@@ -87,9 +92,9 @@ def week_window(now: float | None = None) -> tuple[float, float] | None:
     return end - WEEK, end
 
 
-def clear(which: str | None = None) -> None:
-    data = load()
+def clear(which: str | None = None, account: Account | None = None) -> None:
+    data = load(account)
     for key in (("block", "week") if which is None else (which,)):
         data.pop(f"{key}_end", None)
         data.pop(f"{key}_set_at", None)
-    save(data)
+    save(data, account)

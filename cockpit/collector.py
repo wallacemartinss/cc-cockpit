@@ -1,30 +1,32 @@
 """Incremental collector for Claude Code transcripts.
 
-Reads ~/.claude/projects/**/*.jsonl from the last known offset and appends
-compact events to ~/.local/share/cc-cockpit/events.ndjson.
+Reads <account>/projects/**/*.jsonl from the last known offset and appends
+compact events to ~/.local/share/cc-cockpit/accounts/<id>/events.ndjson.
 
 That buys two things the transcripts alone do not give:
   1. cheap reads - only the delta is parsed on each refresh;
   2. a permanent history - Claude Code prunes transcripts after ~30 days.
+
+Every entry point takes an account. Histories are kept apart rather than tagged
+in one file, because the state that sits next to them - rate limits, calibration,
+anchors - cannot be merged at all; see accounts.py.
 """
 from __future__ import annotations
 
 import json
-import os
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 from . import pricing
-
-CLAUDE_DIR = Path(os.environ.get("CLAUDE_CONFIG_DIR", Path.home() / ".claude"))
-PROJECTS_DIR = CLAUDE_DIR / "projects"
-DATA_DIR = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "cc-cockpit"
-EVENTS_FILE = DATA_DIR / "events.ndjson"
-STATE_FILE = DATA_DIR / "state.json"
+from .accounts import Account, primary
 
 SCHEMA = 1
+
+
+def _account(account: Account | None) -> Account:
+    return account if account is not None else primary()
 
 
 @dataclass(slots=True)
@@ -86,9 +88,9 @@ class Event:
         return self.i + self.o + self.w5 + self.w1 + self.r
 
 
-def _load_state() -> dict:
+def _load_state(acct: Account) -> dict:
     try:
-        st = json.loads(STATE_FILE.read_text())
+        st = json.loads(acct.path("state.json").read_text())
         if st.get("schema") == SCHEMA:
             return st
     except (OSError, ValueError):
@@ -96,19 +98,22 @@ def _load_state() -> dict:
     return {"schema": SCHEMA, "files": {}}
 
 
-def _save_state(state: dict) -> None:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = STATE_FILE.with_suffix(".tmp")
+def _save_state(acct: Account, state: dict) -> None:
+    acct.data_dir.mkdir(parents=True, exist_ok=True)
+    path = acct.path("state.json")
+    tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(state))
-    tmp.replace(STATE_FILE)
+    tmp.replace(path)
 
 
-def load_events() -> list[Event]:
-    """Reads the consolidated history."""
+def load_events(account: Account | None = None) -> list[Event]:
+    """Reads the consolidated history of one account."""
+    acct = _account(account)
     events: list[Event] = []
-    if not EVENTS_FILE.exists():
+    events_file = acct.path("events.ndjson")
+    if not events_file.exists():
         return events
-    with EVENTS_FILE.open(errors="replace") as fh:
+    with events_file.open(errors="replace") as fh:
         for line in fh:
             line = line.strip()
             if not line:
@@ -138,14 +143,16 @@ def _read_new_lines(path: Path, offset: int) -> tuple[list[bytes], int]:
     return complete.splitlines(), offset + len(complete)
 
 
-def refresh() -> tuple[list[Event], int]:
-    """Ingests whatever is new. Returns (full history, new count)."""
-    state = _load_state()
-    events = load_events()
+def refresh(account: Account | None = None) -> tuple[list[Event], int]:
+    """Ingests whatever is new for one account. Returns (full history, new count)."""
+    acct = _account(account)
+    projects_dir = acct.projects_dir
+    state = _load_state(acct)
+    events = load_events(acct)
     seen = {e.k for e in events}
     new: list[Event] = []
 
-    for path in sorted(PROJECTS_DIR.glob("**/*.jsonl")):
+    for path in sorted(projects_dir.glob("**/*.jsonl")):
         key = str(path)
         info = state["files"].get(key, {"offset": 0})
         try:
@@ -170,17 +177,17 @@ def refresh() -> tuple[list[Event], int]:
 
     if new:
         new.sort(key=lambda e: e.t)
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        with EVENTS_FILE.open("a") as fh:
+        acct.data_dir.mkdir(parents=True, exist_ok=True)
+        with acct.path("events.ndjson").open("a") as fh:
             for ev in new:
                 fh.write(ev.to_json() + "\n")
         events.extend(new)
         events.sort(key=lambda e: e.t)
 
     # forget files Claude Code has already pruned
-    alive = {str(p) for p in PROJECTS_DIR.glob("**/*.jsonl")}
+    alive = {str(p) for p in projects_dir.glob("**/*.jsonl")}
     state["files"] = {k: v for k, v in state["files"].items() if k in alive}
-    _save_state(state)
+    _save_state(acct, state)
     return events, len(new)
 
 

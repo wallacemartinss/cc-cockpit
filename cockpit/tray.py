@@ -39,13 +39,12 @@ if _IND_NS == "AyatanaAppIndicator3":
 else:
     from gi.repository import AppIndicator3 as AppIndicator  # noqa: E402
 
-from . import config, icon, server  # noqa: E402
+from . import accounts, config, icon, server, stats  # noqa: E402
 from .i18n import duration as _dur  # noqa: E402
 from .i18n import money as _money  # noqa: E402
 from .i18n import t  # noqa: E402
 from .i18n import tokens as _toks  # noqa: E402
 from .i18n import use as use_language  # noqa: E402
-from .stats import summary  # noqa: E402
 
 APP_ID = "cc-cockpit"
 
@@ -107,7 +106,9 @@ class Tray:
 
     def _work(self) -> None:
         try:
-            data = summary(cfg=self.cfg)
+            parts = stats.per_account(self.cfg)
+            data = parts[0] if len(parts) == 1 else stats.combined(self.cfg, parts)
+            data["parts"] = parts
         except Exception as exc:  # a read error must not kill the indicator
             data = {"error": str(exc)}
         GLib.idle_add(self._apply, data)
@@ -123,11 +124,19 @@ class Tray:
 
     # ---------- panel ----------
     def _paint(self, s: dict) -> None:
+        # With several accounts the label speaks for the primary one - a panel
+        # has room for one number - but the ring takes the colour of whichever
+        # account is worst off, so a 95% on the one you are not watching still
+        # turns the icon red.
+        parts = s.get("parts") or [s]
+        primary = accounts.primary(self.cfg)
+        face = next((p for p in parts if p["account"]["id"] == primary.id), parts[0])
+
         metric = self.cfg.get("tray_metric", "block")
         src = {
-            "block": s["block"],
-            "week": s["week"],
-            "today": s["today_gauge"],
+            "block": face["block"],
+            "week": face["week"],
+            "today": face["today_gauge"],
         }.get(metric)
         if metric == "none" or src is None:
             self.ind.set_label("", APP_ID)
@@ -139,10 +148,19 @@ class Tray:
                 bits.append(f"{pct:.0f}%")
             if self.cfg.get("tray_show_cost", True):
                 bits.append(_money(src["usd"]))
+            if len(parts) > 1:
+                bits.append(face["account"]["label"][:8])
             self.ind.set_label(" · ".join(bits) or "—", "cc-cockpit 000%")
+
         th = s["thresholds"]
-        state = icon.state_for(pct, th["warn"], th["critical"])
+        worst = pct
+        for part in parts:
+            other = part[metric if metric in ("block", "week") else "block"].get("pct")
+            if other is not None and (worst is None or other > worst):
+                worst = other
+        state = icon.state_for(worst, th["warn"], th["critical"])
         self.seq += 1
+        # the arc still shows the account on the label; only the colour escalates
         self.ind.set_icon_full(icon.render(pct, state, self.seq), APP_ID)
 
     # ---------- menu ----------
@@ -170,26 +188,21 @@ class Tray:
         style = self.cfg.get("menu_bar_style", "blocks")
         width = 10 if style == "emoji" else 18
         th = s["thresholds"]
-        b, w, tot = s["block"], s["week"], s["totals"]
+        tot = s["totals"]
 
-        # --- the two limit windows, each as a headline plus one dense line ---
-        for info, title in ((b, t("block_of", h=f"{s['block_hours']:.0f}")),
-                            (w, t("week_window") if w.get("window_source") in ("official", "anchored")
-                                else t("days7"))):
-            pct = info.get("pct")
-            state = icon.state_for(pct, th["warn"], th["critical"])
-            head = f"{title}   {pct:.0f}%" if pct is not None else title
-            self._row(head, icon.dot(state, 22, pct if pct is not None else 0))
-            self._row(f"{_bar(pct, width, style, state)}   {_money(info['usd'])}")
-            tail = []
-            if info.get("remaining_s"):
-                tail.append(t("resets_in", d=_dur(info["remaining_s"])))
-            if info is b and b["active"]:
-                tail.append(t("pace", v=_money(b["burn_usd_per_h"])))
-                tail.append(t("projection", v=_money(b["projected_usd"])))
-            else:
-                tail.append(_toks(info["tokens"]))
-            self._row("   " + "  ·  ".join(tail))
+        # --- the limit windows, per account: they cannot be merged into one ---
+        parts = s.get("parts") or [s]
+        primary_id = accounts.primary(self.cfg).id
+        for part in parts:
+            if len(parts) > 1:
+                pct = part["block"].get("pct")
+                state = icon.state_for(pct, th["warn"], th["critical"])
+                self._row(part["account"]["label"],
+                          icon.dot(state, 22, pct if pct is not None else 0))
+            # only the account on the panel gets the pace and projection lines;
+            # a full block for each would push the totals off a small screen
+            self._windows(part, style, width, th,
+                          detail=len(parts) == 1 or part["account"]["id"] == primary_id)
             self._sep()
 
         # --- day, month, cache ---
@@ -208,6 +221,8 @@ class Tray:
             busy = x["status"] == "busy"
             ctx = (x.get("context") or {}).get("context_pct")
             bits = [x["name"], _money(x["usage"]["usd"])]
+            if len(s.get("parts") or [s]) > 1:
+                bits.insert(1, x.get("account_label") or x.get("account") or "")
             if ctx is not None:
                 bits.append(f"ctx {ctx:.0f}%")
             elif not busy:
@@ -245,6 +260,29 @@ class Tray:
         self._sep()
         self._actions()
         self.menu.show_all()
+
+    def _windows(self, part: dict, style: str, width: int, th: dict, detail: bool) -> None:
+        b, w = part["block"], part["week"]
+        titles = (t("block_of", h=f"{part['block_hours']:.0f}"),
+                  t("week_window") if w.get("window_source") in ("official", "anchored")
+                  else t("days7"))
+        for info, title in zip((b, w), titles):
+            pct = info.get("pct")
+            state = icon.state_for(pct, th["warn"], th["critical"])
+            head = f"{title}   {pct:.0f}%" if pct is not None else title
+            self._row(head, icon.dot(state, 22, pct if pct is not None else 0))
+            self._row(f"{_bar(pct, width, style, state)}   {_money(info['usd'])}")
+            if not detail:
+                continue
+            tail = []
+            if info.get("remaining_s"):
+                tail.append(t("resets_in", d=_dur(info["remaining_s"])))
+            if info is b and b["active"]:
+                tail.append(t("pace", v=_money(b["burn_usd_per_h"])))
+                tail.append(t("projection", v=_money(b["projected_usd"])))
+            else:
+                tail.append(_toks(info["tokens"]))
+            self._row("   " + "  ·  ".join(tail))
 
     def _actions(self) -> None:
         self._action(t("open_dashboard"), lambda *_: webbrowser.open(self.url))

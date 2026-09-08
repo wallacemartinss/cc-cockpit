@@ -75,6 +75,7 @@ cc-cockpit serve --open    # dashboard only (http://127.0.0.1:8765)
 cc-cockpit json            # everything as JSON, for scripting
 cc-cockpit collect         # ingest new transcripts and exit
 cc-cockpit config          # config path and contents
+cc-cockpit accounts        # list the Claude Code accounts it reads
 cc-cockpit --lang es report
 ```
 
@@ -94,6 +95,45 @@ panel that hosts one:
 `cc-cockpit setup` prints what your desktop needs. GNOME is what this is
 developed and tested on; the others follow from the protocol, not from separate
 code paths. The dashboard and `report` depend on none of it.
+
+## More than one account
+
+A company Claude Code in `~/.claude` and a personal one in `~/.claude-pessoal`
+are two subscriptions, not two folders. Each has **its own 5h and 7d windows**,
+so cc-cockpit keeps them apart everywhere: separate history, separate rate-limit
+snapshot, separate calibration.
+
+```bash
+cc-cockpit accounts --detect          # finds ~/.claude* and registers them
+cc-cockpit accounts --primary empresa # whose number the tray label shows
+cc-cockpit setup                      # re-registers the statusline in each one
+```
+
+That last step matters. The statusline payload carries the account's rate limits
+but nothing that identifies the account, so each `settings.json` gets
+`cc-cockpit statusline --account <id>`. Without it, whichever CLI renders last
+overwrites the other's percentage and the tray reports the wrong subscription.
+
+The tray label speaks for the primary account, and the ring takes the colour of
+whichever account is **worst off** — a 95% on the one you are not watching still
+turns the icon red. The dashboard gets a tab per account plus **All accounts**,
+which adds up spend, tokens, projects and models, and deliberately shows one
+ring per account instead of a combined percentage: two windows with different
+ceilings and different resets have no meaningful sum.
+
+Accounts live in the config file, so they can also be edited by hand:
+
+```jsonc
+"accounts": [
+  {"id": "empresa", "label": "Empresa", "dir": "~/.claude"},
+  {"id": "pessoal", "label": "Pessoal", "dir": "~/.claude-pessoal"}
+],
+"primary_account": "empresa"
+```
+
+With nothing configured, everything behaves exactly as before, against
+`CLAUDE_CONFIG_DIR` or `~/.claude`. An existing history is moved into
+`~/.local/share/cc-cockpit/accounts/<id>/` the first time the new version runs.
 
 ## Configuration
 
@@ -118,7 +158,9 @@ the file is written back on start, so new options show up there:
   "local_currency": null,        // e.g. {"code":"BRL","symbol":"R$","rate":5.4}
   "dashboard_port": 8765,
   "warn_pct": 70,
-  "critical_pct": 90
+  "critical_pct": 90,
+  "accounts": [],                // see "More than one account" above
+  "primary_account": null        // null = the first one
 }
 ```
 
@@ -211,6 +253,9 @@ statusline payload (stdin)      official rate limits + context ├─> cockpit/
   `sonnet`, `haiku`, `fable`) until they are added to `pricing.py`.
 - `<synthetic>` rows are responses the CLI generates locally: they show up in
   the request count and cost nothing.
+- With several accounts, the **All accounts** view adds up money but never
+  percentages: each subscription has its own window, and one combined ring
+  would be a number that does not exist anywhere.
 
 ## Packaging
 

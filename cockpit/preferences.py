@@ -12,8 +12,8 @@ import gi
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk  # noqa: E402
 
-from . import config  # noqa: E402
-from .collector import DATA_DIR  # noqa: E402
+from . import accounts, config  # noqa: E402
+from .accounts import DATA_DIR  # noqa: E402
 from .i18n import t  # noqa: E402
 
 SPACING = 8
@@ -65,6 +65,17 @@ class Preferences(Gtk.Window):
                                           suffix=t("seconds"))
         self.port = self._spin(general, 5, t("dashboard_port"),
                                self.cfg.get("dashboard_port", 8765), 1024, 65535)
+
+        # Accounts are edited in the config file or with `cc-cockpit accounts`;
+        # what belongs here is the one choice that changes what the panel shows.
+        self.primary = None
+        found = accounts.listed(self.cfg)
+        if len(found) > 1:
+            who = self._section(outer, t("accounts"), hint=t("combined_note"))
+            self.primary = self._combo(
+                who, 0, t("account"), "primary_account",
+                [(a.id, a.title + ("" if a.exists() else f"  ({t('acct_missing')})"))
+                 for a in found])
 
         limits = self._section(outer, t("ceilings"), hint=t("ceilings_hint"))
         self.block_usd = self._entry(limits, 0, t("block_limit"),
@@ -175,6 +186,8 @@ class Preferences(Gtk.Window):
             "rate": rate,
         } if rate and symbol else None
 
+        if self.primary is not None:
+            cfg["primary_account"] = self.primary.get_active_id()
         cfg["warn_pct"] = int(self.warn.get_value())
         cfg["critical_pct"] = int(self.critical.get_value())
 
