@@ -28,6 +28,8 @@ bundled — and can be pinned in the config file or with `--lang`.
 | **Open sessions** | every live CLI instance: name, project, `busy`/`idle`, uptime, RAM, pid, and what that session has consumed. From the tray, each one opens a terminal in its own directory, resuming that conversation |
 | **Projects** | ranked by consumption across the whole history |
 | **Blocks, days and hours** | time series showing when you actually spend |
+| **Official limits over time** | the real 5h and 7d percentages plotted as they were reported, breaking the line where a window resets rather than drawing a fall that never happened |
+| **When the spending happens** | weekday against hour of day over the last four weeks — the pattern neither the daily nor the hourly series can show on its own |
 | **Token mix** | input / output / cache write 5m / cache write 1h / cache read, with the cache hit rate |
 | **Models, effort and subagents** | where the consumption really goes |
 | **Login** | how long until you have to sign in again — the refresh token's expiry, not the access token's, which the CLI renews by itself every few hours |
@@ -304,7 +306,8 @@ and each configured account otherwise.
 - `i18n.py` holds one catalogue for all three surfaces, plus locale-aware number
   and currency formatting.
 - `panel.py` keeps the official snapshot and appends a line to
-  `panel-history.ndjson` whenever the percentage changes.
+  `panel-history.ndjson` whenever the percentage changes. `/api/history` reads
+  it back for the chart, which is what that file was always for.
 - `accounts.py` owns the roster and hands every stateful module its directory.
   Only money is ever added across accounts — rate limits, ceilings and anchors
   belong to one subscription and are never mixed.

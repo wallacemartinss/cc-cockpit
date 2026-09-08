@@ -69,6 +69,36 @@ def window(name: str, now: float | None = None, snapshot: dict | None = None,
     }
 
 
+def history(account: Account | None = None, since: float | None = None) -> list[dict]:
+    """The official percentages over time, oldest first.
+
+    Samples land only while a CLI is rendering a statusline, so the series is
+    sparse by nature - a gap means nothing was running, which is also when
+    nothing was being consumed.
+
+    Each row carries the window it belongs to. A window that resets starts over
+    at zero, and joining across that boundary would draw a fall that never
+    happened, so the reader is given `block_resets_at` to break the line on.
+    """
+    rows: list[dict] = []
+    try:
+        with history_path(account).open(errors="replace") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(row, dict) and (since is None or row.get("at", 0) >= since):
+                    rows.append(row)
+    except OSError:
+        return []
+    rows.sort(key=lambda r: r.get("at", 0))
+    return rows
+
+
 def contexts(snapshot: dict | None = None, account: Account | None = None) -> dict:
     snap = snapshot if snapshot is not None else load(account)
     return snap.get("sessions") or {}

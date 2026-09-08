@@ -75,6 +75,15 @@
   .mini .who{font-weight:600;font-size:13px}
   .mini .amt{font-size:12.5px;color:var(--muted);margin-top:2px}
   .note{color:var(--muted);font-size:12.5px;margin-top:10px}
+  .scope{float:right;font-weight:400;text-transform:none;letter-spacing:0}
+  .scope button{appearance:none;background:none;border:0;color:var(--muted);
+        font:inherit;font-size:11px;cursor:pointer;padding:0 5px;border-radius:5px}
+  .scope button[aria-pressed="true"]{color:var(--fg);background:var(--panel2)}
+  .heat{display:grid;grid-template-columns:auto repeat(24,1fr);gap:2px;align-items:center}
+  .heat i{display:block;height:14px;border-radius:3px;background:var(--accent)}
+  .heat .lbl-y{font-size:10.5px;color:var(--muted);padding-right:6px;text-align:right}
+  .heat .lbl-x{font-size:9.5px;color:var(--muted);text-align:center}
+  .delta{font-size:12px;margin-top:3px}
 </style>
 </head>
 <body>
@@ -94,8 +103,18 @@
   <div class="grid g4" style="margin-top:14px" id="kpis"></div>
 
   <div class="card" style="margin-top:14px">
+    <h2 data-t="card_official"></h2>
+    <div id="official"></div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
     <h2 data-t="card_daily"></h2>
     <div id="daily"></div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <h2><span data-t="card_heatmap"></span> <span class="muted" id="heat-note"></span></h2>
+    <div id="heatmap"></div>
   </div>
 
   <div class="grid g2" style="margin-top:14px">
@@ -111,7 +130,8 @@
 
   <div class="grid g2" style="margin-top:14px">
     <div class="card">
-      <h2 data-t="card_projects"></h2>
+      <h2><span data-t="card_projects"></span>
+        <span class="scope" id="proj-scope"></span></h2>
       <table id="projects"></table>
     </div>
     <div class="card">
@@ -190,6 +210,94 @@ function bars(items, {value, label, height=110, fmt=money, hi=null}){
   return `<div style="display:flex;align-items:flex-end;gap:3px;height:${height}px">${cells}</div>
           <div style="display:flex;gap:3px;margin-top:6px">${ticks}</div>`;
 }
+// The official series is sparse by nature - a sample lands only while a CLI is
+// rendering - and it restarts at zero whenever its window resets. Joining across
+// a reset would draw a fall that never happened, so the line breaks there, and
+// on any gap long enough to mean nothing was running.
+function series(rows, key, resetKey, colour, box){
+  const {x0, x1, W, H} = box;
+  const px = t => (t - x0) / Math.max(1, x1 - x0) * W;
+  const py = v => H - v / 100 * H;
+  const segs = []; let cur = [], win = null, last = null;
+  for (const r of rows){
+    if (r[key] == null) continue;
+    const broke = r[resetKey] !== win || (last !== null && r.at - last > 3 * 3600);
+    if (broke && cur.length){ segs.push(cur); cur = []; }
+    win = r[resetKey]; last = r.at; cur.push(r);
+  }
+  if (cur.length) segs.push(cur);
+  return segs.map(seg => {
+    const pts = seg.map(r => `${px(r.at).toFixed(1)},${py(r[key]).toFixed(1)}`).join(' ');
+    return seg.length === 1
+      ? `<circle cx="${px(seg[0].at).toFixed(1)}" cy="${py(seg[0][key]).toFixed(1)}" r="2" fill="${colour}"/>`
+      : `<polyline points="${pts}" fill="none" stroke="${colour}" stroke-width="2"
+           stroke-linejoin="round" stroke-linecap="round"/>`;
+  }).join('');
+}
+
+function officialChart(rows){
+  if (!rows.length) return `<div class="muted">${esc(t('no_official_yet'))}</div>`;
+  // the left gutter has to fit "100%" at the axis font size; 26 clipped it to "00%"
+  const W = 1000, H = 150, pad = 38;
+  const x0 = rows[0].at, x1 = Math.max(rows[rows.length-1].at, Date.now()/1000);
+  const box = {x0, x1, W, H};
+  const grid = [0, 50, 100].map(v => {
+    const y = (H - v/100*H).toFixed(1);
+    return `<line x1="0" y1="${y}" x2="${W}" y2="${y}" stroke="var(--line)" stroke-width="1"/>
+            <text x="-6" y="${(+y+3).toFixed(1)}" text-anchor="end" class="lbl">${v}%</text>`;
+  }).join('');
+  const days = [];
+  for (let t = Math.ceil(x0/86400)*86400; t <= x1; t += 86400){
+    const x = ((t - x0)/Math.max(1, x1-x0)*W).toFixed(1);
+    days.push(`<line x1="${x}" y1="0" x2="${x}" y2="${H}" stroke="var(--line)" stroke-dasharray="2 4"/>
+      <text x="${x}" y="${H+14}" text-anchor="middle" class="lbl">${
+        new Date(t*1000).toLocaleDateString(LOCALE, {day:'2-digit', month:'2-digit'})}</text>`);
+  }
+  const legend = [['block','var(--accent)',t('block_of',{h:'5'})],
+                  ['week','var(--blue)', t('days7')]]
+    .map(([k,c,l]) => `<span class="dot" style="background:${c}"></span>${esc(l)}`).join('  ');
+  return `<div style="overflow-x:auto"><svg viewBox="${-pad} ${-8} ${W+pad*2} ${H+30}" style="width:100%;min-width:520px">
+      ${grid}${days.join('')}
+      ${series(rows, 'week', 'week_resets_at', 'var(--blue)', box)}
+      ${series(rows, 'block', 'block_resets_at', 'var(--accent)', box)}
+    </svg></div>
+    <div class="note">${legend}</div>`;
+}
+
+function heatmap(hm){
+  if (!hm || !hm.peak) return `<div class="muted">${esc(t('no_data'))}</div>`;
+  // a Monday, so the weekday names come from the viewer's locale
+  const monday = new Date(Date.UTC(2024, 0, 1));
+  const cells = [];
+  for (let d = 0; d < 7; d++){
+    const name = new Date(monday.getTime() + d*86400000)
+      .toLocaleDateString(LOCALE, {weekday:'short', timeZone:'UTC'});
+    cells.push(`<div class="lbl-y">${esc(name)}</div>`);
+    for (let h = 0; h < 24; h++){
+      const v = hm.grid[d][h];
+      const a = v ? (0.12 + 0.88 * Math.sqrt(v / hm.peak)).toFixed(3) : 0;
+      cells.push(`<i style="opacity:${a}" title="${esc(name)} ${String(h).padStart(2,'0')}h · ${money(v)}"></i>`);
+    }
+  }
+  cells.push('<div></div>');
+  for (let h = 0; h < 24; h++)
+    cells.push(`<div class="lbl-x">${h % 3 === 0 ? String(h).padStart(2,'0') : ''}</div>`);
+  return `<div style="overflow-x:auto"><div class="heat" style="min-width:520px">${cells.join('')}</div></div>`;
+}
+
+// Yesterday is the only comparison a usage panel is really asked for, and it was
+// already being computed and thrown away.
+function yesterday(tt){
+  const y = tt.yesterday.usd, today = tt.today.usd;
+  if (!y) return '';
+  const pct = (today - y) / y * 100;
+  if (Math.abs(pct) < 1) return `<div class="delta muted">${esc(t('same_as_yesterday'))}</div>`;
+  const up = pct > 0;
+  const col = up ? 'var(--warn)' : 'var(--ok)';
+  const text = t('vs_yesterday', {v: (up ? '▲ ' : '▼ ') + Math.abs(pct).toFixed(0) + '%'});
+  return `<div class="delta" style="color:${col}" title="${esc(money(y))}">${esc(text)}</div>`;
+}
+
 function stacked(b){
   const parts = [
     ['cache read', b.cache_read, 'var(--blue)'],
@@ -209,7 +317,8 @@ function stacked(b){
 
 // Which account the page is showing. Kept in localStorage so a refresh, or the
 // tray opening the dashboard again, lands on the tab you were last reading.
-let ACCOUNTS = null, CURRENT = null;
+let ACCOUNTS = null, CURRENT = null, PROJ_SCOPE = 'all';
+try { PROJ_SCOPE = localStorage.getItem('cc-cockpit.projects') || 'all'; } catch(e) {}
 try { CURRENT = localStorage.getItem('cc-cockpit.account'); } catch(e) {}
 
 function pickAccount(id){
@@ -251,7 +360,10 @@ async function tick(){
     if(!CURRENT || !known.includes(CURRENT)) CURRENT = ACCOUNTS.primary;
   }
   const qs = CURRENT ? ('?account=' + encodeURIComponent(CURRENT)) : '';
-  const s = await (await fetch('/api/summary' + qs)).json();
+  const [s, official] = await Promise.all([
+    (await fetch('/api/summary' + qs)).json(),
+    fetch('/api/history' + qs).then(r => r.ok ? r.json() : []).catch(() => []),
+  ]);
   T = s.i18n.catalog; LOCALE = s.i18n.tag; LOCAL = s.local_currency;
   document.documentElement.lang = s.i18n.language;
   document.querySelectorAll('[data-t]').forEach(el => el.textContent = t(el.dataset.t));
@@ -303,12 +415,13 @@ async function tick(){
       w.remaining_s ? t('resets_in',{d:dur(w.remaining_s)})
                     : `${nf().format(w.requests)} ${t('requests')}`],
     [t('today'), s.today_gauge,
-      `${tt.today.requests} ${t('requests')} · ${tt.today.sessions} ${t('sessions')}`],
-  ].map(([title,d,cap])=>`
+      `${tt.today.requests} ${t('requests')} · ${tt.today.sessions} ${t('sessions')}`, yesterday(tt)],
+  ].map(([title,d,cap,extra])=>`
     <div class="card"><h2>${title}</h2><div class="gauge">
       ${ring(d.pct, color(d.pct, th))}
       <div><div class="num">${money(d.usd)}<span class="muted" style="font-size:13px;font-weight:400">${local(d.usd)}</span></div>
         <div class="cap">${toks(d.tokens)} tokens · ${esc(cap)}</div>
+        ${extra || ''}
         ${d.limit?`<div class="cap">${esc(t('reference_ceiling',{v:money(d.limit)}))}${
           d.limit_source?' · '+esc(t('src_'+d.limit_source)):''}</div>`:''}
       </div></div></div>`).join('');
@@ -322,6 +435,11 @@ async function tick(){
     [(spent && b.eta_limit_s!=null && b.active)?dur(b.eta_limit_s):'—', t('kpi_eta')],
     [tt.last_7d.cache_hit_pct+'%', t('kpi_cache')],
   ].map(([v,l])=>`<div class="card kpi"><div class="v mono">${v}</div><div class="l">${esc(l)}</div></div>`).join('');
+
+  $('#official').innerHTML = officialChart(official);
+  $('#heatmap').innerHTML = heatmap(s.heatmap);
+  $('#heat-note').textContent = s.heatmap
+    ? '· ' + t('heatmap_weeks', {n: s.heatmap.weeks}) : '';
 
   $('#daily').innerHTML = bars(s.daily.slice(-30), {
     value:d=>d.usd, label:d=>d.date.slice(8)+'/'+d.date.slice(5,7),
@@ -340,12 +458,23 @@ async function tick(){
         <div class="pth">${esc(x.cwd)}</div>
       </div>
       <div class="right"><div class="mono">${money(x.usage.usd)}</div>
-        <div class="muted" style="font-size:11.5px">${toks(x.usage.tokens)} · ${dur(x.uptime_s)} · pid ${x.pid}</div></div>
+        <div class="muted" style="font-size:11.5px">${
+          (x.context && x.context.context_pct != null)
+            ? 'ctx ' + x.context.context_pct.toFixed(0) + '% · ' : ''
+        }${toks(x.usage.tokens)} · ${dur(x.uptime_s)} · pid ${x.pid}</div></div>
     </div>`).join('') : `<div class="muted">${esc(t('no_sessions'))}</div>`;
 
-  const pmax = Math.max(...s.projects.map(p=>p.usd), 1);
+  $('#proj-scope').innerHTML = [['today', t('scope_today')], ['all', t('scope_all')]]
+    .map(([k,l]) => `<button data-scope="${k}" aria-pressed="${k===PROJ_SCOPE}">${esc(l)}</button>`).join('');
+  $('#proj-scope').querySelectorAll('button').forEach(el => el.onclick = () => {
+    PROJ_SCOPE = el.dataset.scope;
+    try { localStorage.setItem('cc-cockpit.projects', PROJ_SCOPE); } catch(e) {}
+    safeTick();
+  });
+  const plist = PROJ_SCOPE === 'today' ? (s.projects_today || []) : s.projects;
+  const pmax = Math.max(...plist.map(p=>p.usd), 1);
   $('#projects').innerHTML = `<tr><th>${esc(t('th_project'))}</th><th class="r">${esc(t('th_tokens'))}</th><th class="r">USD</th><th style="width:110px"></th></tr>` +
-    s.projects.slice(0,12).map(p=>`<tr>
+    (plist.length ? plist : []).slice(0,12).map(p=>`<tr>
       <td title="${esc(p.cwd)}">${esc(p.label)}</td>
       <td class="r mono muted">${toks(p.tokens)}</td>
       <td class="r mono">${money(p.usd)}</td>

@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import accounts, config, stats
+from . import accounts, config, panel, stats
 from .stats import summary
 
 # inside the package, so it survives a wheel install
@@ -62,6 +62,17 @@ class Handler(BaseHTTPRequestHandler):
                     self._send(404, str(exc).encode(), "text/plain; charset=utf-8")
                     return
                 self._send(200, body, "application/json")
+            elif path == "/api/history":
+                wanted = (query.get("account") or [None])[0]
+                try:
+                    account = accounts.resolve(
+                        None if wanted in ("all", stats.ALL_ID) else wanted)
+                except ValueError as exc:
+                    self._send(404, str(exc).encode(), "text/plain; charset=utf-8")
+                    return
+                days = float((query.get("days") or ["7"])[0] or 7)
+                rows = panel.history(account, since=time.time() - days * 86400)
+                self._send(200, json.dumps(rows).encode(), "application/json")
             elif path == "/api/accounts":
                 self._send(200, json.dumps(stats.overview()).encode(), "application/json")
             elif path == "/api/config":

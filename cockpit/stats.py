@@ -128,6 +128,25 @@ def _fill_days(daily: dict[str, Bucket], keep: int) -> list[dict]:
     return out[-keep:]
 
 
+def _heatmap(events: list[Event], now: float, weeks: int = 4) -> dict:
+    """Spend by weekday and hour of day.
+
+    The daily and hourly series each answer "how much, when" along one axis.
+    Crossing them is what shows a *pattern* - the Tuesday afternoon that is
+    always expensive, the weekend that is not - which neither one can.
+    """
+    cutoff = now - weeks * 7 * 86400
+    grid = [[0.0] * 24 for _ in range(7)]
+    for e in events:
+        if e.t < cutoff:
+            continue
+        when = datetime.fromtimestamp(e.t).astimezone()
+        grid[when.weekday()][when.hour] += e.c          # Monday is 0
+    peak = max((v for row in grid for v in row), default=0.0)
+    return {"weeks": weeks, "peak": round(peak, 4),
+            "grid": [[round(v, 4) for v in row] for row in grid]}
+
+
 def _fill_hours(hourly: dict[int, Bucket], now: float) -> list[dict]:
     first = int((now - 23 * HOUR) // HOUR)
     last = int(now // HOUR)
@@ -321,6 +340,7 @@ def summary(events: list[Event] | None = None, cfg: dict | None = None,
         "week": week_info,
         "daily": _fill_days(daily, 60),
         "hourly_24h": _fill_hours(hourly24, now),
+        "heatmap": _heatmap(events, now),
         "blocks": [
             {"start": b["start"], "end": b["end"], **b["bucket"].as_dict()}
             for b in blocks[-40:]
