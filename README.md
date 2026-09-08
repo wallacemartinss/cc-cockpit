@@ -111,7 +111,10 @@ cc-cockpit accounts --primary empresa # whose number the tray label shows
 cc-cockpit setup                      # re-registers the statusline in each one
 ```
 
-**Settings** has an *Accounts* section where each name can be edited directly —
+The tray menu shows one section per account, and **Shown on the panel** in it
+switches which account the label speaks for without opening Settings.
+
+The Settings *Accounts* tab is where each name is edited —
 that is the name the tray, the tabs and the report use. The **id** is not
 editable there: it names `accounts/<id>/`, which holds months Claude Code has
 already pruned, so changing it has to move a directory. That is what
@@ -147,7 +150,9 @@ With nothing configured, everything behaves exactly as before, against
 
 **Settings** in the tray menu opens a proper window — a menu has nowhere to
 type a number, and GNOME's appindicator extension flattens submenus to a single
-level anyway. Saving applies right away, without a restart.
+level anyway. It is split into **General**, **Accounts**, **Limits** and
+**Plan**, each tab scrolling on its own so nothing falls off a short screen, and
+Save stays reachable below them. Saving applies right away, without a restart.
 
 Everything lives in `~/.config/cc-cockpit/config.json`, and any key missing from
 the file is written back on start, so new options show up there:

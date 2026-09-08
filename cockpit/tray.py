@@ -165,13 +165,16 @@ class Tray:
 
     # ---------- menu ----------
     def _build_menu(self, s: dict) -> None:
+        # Nothing here owns the timer or the settings window, and wiping them on
+        # every rebuild used to lose both: the timer id went missing so changing
+        # the refresh interval stacked a second one instead of replacing it, and
+        # the window reference went missing so Settings opened a new window on
+        # every click after the first refresh.
         self._rebuilding = True
         try:
             self._fill_menu(s)
         finally:
             self._rebuilding = False
-        self.prefs = None
-        self.timer = None
 
     def _fill_menu(self, s: dict) -> None:
         for child in self.menu.get_children():
@@ -285,12 +288,45 @@ class Tray:
             self._row("   " + "  ·  ".join(tail))
 
     def _actions(self) -> None:
+        self._account_picker()
         self._action(t("open_dashboard"), lambda *_: webbrowser.open(self.url))
         self._action(t("refresh_now"), self.refresh)
 
         self._action(t("settings"), self._open_preferences)
 
         self._action(t("quit"), lambda *_: Gtk.main_quit())
+
+    def _account_picker(self) -> None:
+        """Which account the panel label speaks for, without opening Settings."""
+        found = accounts.listed(self.cfg)
+        if len(found) < 2:
+            return
+        current = accounts.primary(self.cfg).id
+        item = Gtk.MenuItem(label=t("panel_account"))
+        inner = Gtk.Menu()
+        group = None
+        for account in found:
+            choice = Gtk.RadioMenuItem(label=account.title)
+            if group is None:
+                group = choice
+            else:
+                choice.join_group(group)
+            choice.set_active(account.id == current)
+            choice.connect("toggled", self._pick_account, account.id)
+            inner.append(choice)
+        item.set_submenu(inner)
+        self.menu.append(item)
+        self._sep()
+
+    def _pick_account(self, widget, account_id: str) -> None:
+        # set_active() during the rebuild fires this too; only a real click counts
+        if self._rebuilding or not widget.get_active():
+            return
+        cfg = config.load()
+        cfg["primary_account"] = account_id
+        config.save(cfg)
+        self.cfg = cfg
+        self.refresh()
 
     # ---------- settings ----------
     def _open_preferences(self, *_a) -> None:

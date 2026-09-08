@@ -2,6 +2,10 @@
 
 The tray menu cannot host this: GNOME's appindicator extension renders submenus
 inline and stops at one level, and a menu has nowhere to type a number anyway.
+
+The settings are split across notebook tabs, and each tab scrolls. As one flat
+column it had outgrown a laptop screen - the bottom rows, Save included, were
+simply unreachable on a short display with no way to scroll to them.
 """
 from __future__ import annotations
 
@@ -45,15 +49,19 @@ class Preferences(Gtk.Window):
         super().__init__(title=t("prefs_title"))
         self.cfg = config.load()
         self.on_saved = on_saved
-        self.set_default_size(460, -1)
+        self.set_default_size(520, 540)
         self.set_border_width(16)
         self.set_position(Gtk.WindowPosition.CENTER)
 
-        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
-        self.add(outer)
+        frame = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+        self.add(frame)
+        self.tabs = Gtk.Notebook()
+        self.tabs.set_vexpand(True)
+        frame.pack_start(self.tabs, True, True, 0)
 
+        outer = self._page(t("tab_general"))
         block_hours = f"{self.cfg.get('block_hours', 5):.0f}"
-        general = self._section(outer, t("general"))
+        general = self._section(outer, "")
         self.metric = self._combo(general, 0, t("panel_shows"), "tray_metric", [
             ("block", t("block_of", h=block_hours)), ("week", t("days7")),
             ("today", t("today")), ("none", t("metric_none"))])
@@ -80,7 +88,7 @@ class Preferences(Gtk.Window):
         self.aliases: dict[str, Gtk.Entry] = {}
         self.alias_was: dict[str, str] = {}
         found = accounts.listed(self.cfg)
-        who = self._section(outer, t("accounts"), hint=t("accounts_hint"))
+        who = self._section(self._page(t("accounts")), "", hint=t("accounts_hint"))
         for row, account in enumerate(found):
             entry = self._entry(who, row, account.id, account.label or account.id)
             entry.set_placeholder_text(account.id)
@@ -100,29 +108,31 @@ class Preferences(Gtk.Window):
                 who, len(found), t("panel_account"), "primary_account",
                 [(a.id, a.title) for a in found])
 
-        limits = self._section(outer, t("ceilings"), hint=t("ceilings_hint"))
+        limits_page = self._page(t("tab_limits"))
+        limits = self._section(limits_page, t("ceilings"), hint=t("ceilings_hint"))
         self.block_usd = self._entry(limits, 0, t("block_limit"),
                                      _number((self.cfg.get("limits") or {}).get("block_usd")))
         self.week_usd = self._entry(limits, 1, t("week_limit"),
                                     _number((self.cfg.get("limits") or {}).get("week_usd")))
 
-        plan = self._section(outer, t("plan_title"), hint=t("plan_hint"))
+        plan_page = self._page(t("tab_plan"))
+        plan = self._section(plan_page, t("plan_title"), hint=t("plan_hint"))
         self.plan_name = self._entry(plan, 0, t("plan_name_label"), self.cfg.get("plan_name") or "")
         self.plan_cost = self._entry(plan, 1, t("plan_cost"),
                                      _number(self.cfg.get("plan_monthly_usd")))
 
         currency = self.cfg.get("local_currency") or {}
-        money = self._section(outer, t("currency_title"))
+        money = self._section(plan_page, t("currency_title"))
         self.currency_code = self._entry(money, 0, t("currency_code"), currency.get("code", ""))
         self.currency_symbol = self._entry(money, 1, t("currency_symbol"), currency.get("symbol", ""))
         self.currency_rate = self._entry(money, 2, t("currency_rate"), _number(currency.get("rate")))
 
-        alerts = self._section(outer, t("alerts"))
+        alerts = self._section(limits_page, t("alerts"))
         self.warn = self._spin(alerts, 0, t("warn_at"), self.cfg.get("warn_pct", 70), 1, 100)
         self.critical = self._spin(alerts, 1, t("critical_at"), self.cfg.get("critical_pct", 90), 1, 200)
 
         buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACING)
-        outer.pack_start(buttons, False, False, 0)
+        frame.pack_start(buttons, False, False, 0)
         for label, target in ((t("open_config"), config.CONFIG_FILE), (t("open_data"), DATA_DIR)):
             link = Gtk.Button(label=label)
             link.set_relief(Gtk.ReliefStyle.NONE)
@@ -138,10 +148,23 @@ class Preferences(Gtk.Window):
         buttons.pack_end(save, False, False, 0)
 
     # ---------- building blocks ----------
+    def _page(self, title: str) -> Gtk.Box:
+        """A notebook tab whose content scrolls when the screen is short."""
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14,
+                      border_width=14)
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroller.add(box)
+        self.tabs.append_page(scroller, Gtk.Label(label=title))
+        return box
+
     def _section(self, parent: Gtk.Box, title: str, hint: str = "") -> Gtk.Grid:
-        label = Gtk.Label(halign=Gtk.Align.START)
-        label.set_markup(f"<b>{GLib_escape(title)}</b>")
-        parent.pack_start(label, False, False, 0)
+        # a tab holding a single section repeats itself with a header, so the
+        # title is optional and the tab name carries it instead
+        if title:
+            label = Gtk.Label(halign=Gtk.Align.START)
+            label.set_markup(f"<b>{GLib_escape(title)}</b>")
+            parent.pack_start(label, False, False, 0)
         if hint:
             note = Gtk.Label(label=hint, halign=Gtk.Align.START, wrap=True, xalign=0)
             note.get_style_context().add_class("dim-label")
