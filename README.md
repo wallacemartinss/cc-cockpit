@@ -4,7 +4,7 @@
 [![PyPI](https://img.shields.io/pypi/v/cc-cockpit)](https://pypi.org/project/cc-cockpit/)
 [![AUR](https://img.shields.io/aur/version/cc-cockpit)](https://aur.archlinux.org/packages/cc-cockpit)
 
-A Claude Code usage panel for GNOME: a tray indicator with a consumption ring,
+A Claude Code usage panel for Linux: a tray indicator with a consumption ring,
 a local dashboard and a terminal summary.
 
 Everything is read from what Claude Code already writes under `~/.claude`. It
@@ -64,7 +64,7 @@ git clone https://github.com/wallacemartinss/cc-cockpit
 cd cc-cockpit && ./install.sh
 ```
 
-`cc-cockpit setup` registers the GNOME autostart entry, captures the statusline
+`cc-cockpit setup` registers the autostart entry, captures the statusline
 (see below), checks the tray dependencies and runs the first collection.
 `cc-cockpit setup --remove` undoes the autostart entry.
 
@@ -78,11 +78,28 @@ cc-cockpit config          # config path and contents
 cc-cockpit --lang es report
 ```
 
+## Desktops
+
+The indicator is a StatusNotifierItem, not a GNOME applet, so it shows up on any
+panel that hosts one:
+
+| | |
+|---|---|
+| **GNOME** | needs the AppIndicator extension (`gnome-shell-extension-appindicator`); Ubuntu ships it enabled |
+| **XFCE** | `xfce4-panel` 4.16+ hosts indicators through **Status Tray Items** — add that item to the panel. On 4.14, install `xfce4-statusnotifier-plugin` |
+| **KDE Plasma** | nothing to install |
+| **LXQt** | enable the Status Notifier plugin on the panel |
+| **LXDE and other XEmbed-only trays** | the ring icon still shows, through the fallback in libayatana-appindicator, but the panel label (`45% · $12.30`) is lost — `snixembed` brings the indicator path back |
+
+`cc-cockpit setup` prints what your desktop needs. GNOME is what this is
+developed and tested on; the others follow from the protocol, not from separate
+code paths. The dashboard and `report` depend on none of it.
+
 ## Configuration
 
-**Settings** in the tray menu opens a proper window — GNOME's appindicator
-extension renders submenus inline and stops at one level, and a menu has nowhere
-to type a number. Saving applies right away, without a restart.
+**Settings** in the tray menu opens a proper window — a menu has nowhere to
+type a number, and GNOME's appindicator extension flattens submenus to a single
+level anyway. Saving applies right away, without a restart.
 
 Everything lives in `~/.config/cc-cockpit/config.json`, and any key missing from
 the file is written back on start, so new options show up there:

@@ -1,4 +1,10 @@
-"""GNOME tray indicator."""
+"""Tray indicator, over StatusNotifierItem.
+
+Nothing here is GNOME-specific: libayatana-appindicator publishes the item on
+the session bus and whichever panel implements the KDE spec renders it. What
+changes between desktops is only which package provides that host, so the
+message shown when the binding is missing asks desktop.py for the right advice.
+"""
 from __future__ import annotations
 
 import threading
@@ -8,6 +14,8 @@ import gi
 
 gi.require_version("Gtk", "3.0")
 from gi.repository import GLib, Gtk  # noqa: E402
+
+from . import desktop as _desktop  # noqa: E402
 
 _IND_NS = None
 for ns in ("AyatanaAppIndicator3", "AppIndicator3"):
@@ -21,8 +29,9 @@ for ns in ("AyatanaAppIndicator3", "AppIndicator3"):
 if _IND_NS is None:
     raise SystemExit(
         "Missing the AppIndicator binding. Install it with:\n"
-        "  sudo apt install gir1.2-ayatanaappindicator3-0.1\n"
-        "and make sure the 'Ubuntu AppIndicators' extension is enabled."
+        "  sudo apt install gir1.2-ayatanaappindicator3-0.1   # Debian/Ubuntu\n"
+        "  sudo pacman -S libayatana-appindicator             # Arch\n"
+        + _desktop.tray_host_hint()
     )
 
 if _IND_NS == "AyatanaAppIndicator3":
@@ -289,5 +298,11 @@ class Tray:
 
 
 def main() -> None:
+    settings = Gtk.Settings.get_default()
+    if settings is not None:
+        # The state in this menu is carried by the coloured dots, and GTK hides
+        # menu images unless this is on - it is off by default on several
+        # desktops since GTK deprecated the property.
+        settings.set_property("gtk-menu-images", True)
     Tray()
     Gtk.main()

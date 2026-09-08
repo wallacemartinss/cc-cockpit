@@ -89,6 +89,9 @@ def _setup(args) -> int:
     else:
         print(f"tray: unavailable - install {missing}")
         print("      the dashboard and 'report' work without it")
+    # setup is where the panel side is worth saying out loud: the binding can be
+    # installed and the indicator still invisible for want of a host on the panel
+    print(f"      {desktop.tray_host_hint()}")
     events, new = refresh()
     print(t("cli_new_events", new=new, total=len(events)))
     return 0
@@ -166,7 +169,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--version", action="version", version=f"cc-cockpit {__version__}")
     parser.add_argument("--lang", choices=i18n.SUPPORTED, help="override the interface language")
     sub = parser.add_subparsers(dest="cmd")
-    sub.add_parser("tray", help="tray indicator for GNOME (default)")
+    tray_cmd = sub.add_parser("tray", help="tray indicator (default)")
+    tray_cmd.add_argument("--delay", type=float, default=0, metavar="SECONDS",
+                          help="wait before starting, so the panel is up first "
+                               "(the autostart entry uses it)")
     serve_cmd = sub.add_parser("serve", help="dashboard only")
     serve_cmd.add_argument("--port", type=int)
     serve_cmd.add_argument("--open", action="store_true")
@@ -200,6 +206,9 @@ def main(argv: list[str] | None = None) -> int:
 
     cmd = args.cmd or "tray"
     if cmd == "tray":
+        delay = getattr(args, "delay", 0)   # absent when 'tray' came from the default
+        if delay > 0:
+            time.sleep(delay)
         from .tray import main as tray_main
         tray_main()
     elif cmd == "serve":

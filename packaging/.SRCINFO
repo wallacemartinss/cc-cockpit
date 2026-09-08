@@ -1,5 +1,5 @@
 pkgbase = cc-cockpit
-	pkgdesc = Claude Code usage panel for GNOME: tray indicator, local dashboard and terminal summary
+	pkgdesc = Claude Code usage panel for Linux: tray indicator, local dashboard and terminal summary
 	pkgver = 0.3.0
 	pkgrel = 1
 	url = https://github.com/wallacemartinss/cc-cockpit

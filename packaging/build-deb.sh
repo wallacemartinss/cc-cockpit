@@ -51,12 +51,17 @@ Section: utils
 Priority: optional
 Architecture: all
 Depends: python3 (>= 3.9), python3-gi, python3-cairo, gir1.2-ayatanaappindicator3-0.1
+Suggests: gnome-shell-extension-appindicator, xfce4-statusnotifier-plugin
 Maintainer: Wallace Martins da Silva <wallacemartinss@gmail.com>
 Homepage: https://github.com/wallacemartinss/cc-cockpit
-Description: Claude Code usage panel for GNOME
+Description: Claude Code usage panel for Linux desktops
  Tray indicator with a live rate-limit ring, a local dashboard and a terminal
  summary for Claude Code usage. Reads the official limits from the statusline
  payload, so it needs no credentials and makes no network calls.
+ .
+ The indicator is a StatusNotifierItem, so it works on any panel that hosts one:
+ GNOME with the AppIndicator extension, XFCE 4.16+ with Status Tray Items, KDE
+ Plasma out of the box. The Suggests cover the two that need a package.
 CONTROL
 
 mkdir -p "$ROOT/dist"
