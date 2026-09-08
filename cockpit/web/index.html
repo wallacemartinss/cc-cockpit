@@ -487,7 +487,9 @@ async function tick(){
         <div class="cap">${toks(d.tokens)} tokens · ${esc(cap)}</div>
         ${extra || ''}
         ${d.limit?`<div class="cap">${esc(t('reference_ceiling',{v:money(d.limit)}))}${
-          d.limit_source?' · '+esc(t('src_'+d.limit_source)):''}</div>`:''}
+          d.limit_error?' ±'+(d.limit_error*100).toFixed(0)+'%':''}${
+          d.limit_source?' · '+esc(t('src_'+d.limit_source)):''}${
+          d.limit_samples>1?' · '+esc(t('readings',{n:d.limit_samples})):''}</div>`:''}
       </div></div></div>`).join('');
 
   // an open window with nothing spent in it makes pace and projection zero;

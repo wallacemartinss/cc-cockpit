@@ -252,13 +252,34 @@ def summary(events: list[Event] | None = None, cfg: dict | None = None,
         lim_week = max(weeks.values(), default=0.0)
         src_week = "peak"
 
-    def _official_gauge(info: dict | None, bucket: Bucket) -> dict:
-        """Official percentage wins, and it also reveals the real ceiling."""
+    def _official_gauge(info: dict | None, bucket: Bucket, window: str) -> dict:
+        """Official percentage wins, and it also implies the ceiling.
+
+        The percentage is reported whole, so a single reading pins the ceiling
+        only to within ±0.5/pct - ±7% at 7%, ±25% at 2%. Deriving it fresh on
+        every render made the figure jump by hundreds between refreshes for no
+        reason other than the panel ticking over a percentage point.
+
+        So each reading is kept (calibration.observe dedups them) and the median
+        of what has accumulated is what gets shown, rounded to the precision the
+        samples actually support.
+        """
         if not info:
             return {}
         pct = info["pct"]
-        limit = round(bucket.usd / (pct / 100), 2) if pct > 0 else None
-        return {"pct": round(pct, 1), "limit": limit, "limit_source": "official",
+        if pct <= 0:
+            return {"pct": round(pct, 1), "official_age_s": info["age_s"]}
+        calibration.observe(window, bucket.usd, pct, info["resets_at"], acct)
+        data = calibration.load(acct)
+        limit = calibration.ceiling(window, data)
+        if limit is None:                    # nothing sharp enough kept yet
+            limit = bucket.usd / (pct / 100)
+        error = calibration.precision(window, data) or (0.5 / pct)
+        return {"pct": round(pct, 1),
+                "limit": calibration.rounded(limit, error),
+                "limit_source": "official",
+                "limit_error": round(error, 4),
+                "limit_samples": len(data.get(window, [])),
                 "official_age_s": info["age_s"]}
 
     if active:
@@ -279,7 +300,7 @@ def summary(events: list[Event] | None = None, cfg: dict | None = None,
             **_gauge(b.usd, lim_block),
             "limit_source": src_block,
             "window_source": block_source,
-            **_official_gauge(official_block, b),
+            **_official_gauge(official_block, b, "block"),
         }
         if lim_block and burn > 0:
             headroom = max(lim_block - b.usd, 0.0)
@@ -316,7 +337,7 @@ def summary(events: list[Event] | None = None, cfg: dict | None = None,
                       "end": now, "remaining_s": None}
     week_info = {**week.as_dict(), **_gauge(week.usd, lim_week),
                  "limit_source": src_week, **week_extra,
-                 **_official_gauge(official_week, week)}
+                 **_official_gauge(official_week, week, "week")}
 
     live = live_sessions(acct)
     contexts = panel.contexts(account=acct)
