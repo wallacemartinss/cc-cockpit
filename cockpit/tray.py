@@ -41,7 +41,7 @@ if _IND_NS == "AyatanaAppIndicator3":
 else:
     from gi.repository import AppIndicator3 as AppIndicator  # noqa: E402
 
-from . import accounts, config, icon, instance, server, stats, terminal  # noqa: E402
+from . import accounts, bars, config, icon, instance, server, stats, terminal  # noqa: E402
 from .i18n import duration as _dur  # noqa: E402
 from .i18n import money as _money  # noqa: E402
 from .i18n import t  # noqa: E402
@@ -52,23 +52,8 @@ from .i18n import window_tail  # noqa: E402
 APP_ID = "cc-cockpit"
 
 
-# Solid blocks keep a single advance width in the panel font; the parallelogram
-# pair (U+25B0/25B1) does not and comes out slanted and uneven.
-BAR_STYLES = {
-    "blocks": ("█", "░"),
-    "dots": ("●", "○"),
-    "emoji": ("🟩", "⬛"),
-}
-
-
 def _bar(pct: float | None, width: int, style: str, state: str = "ok") -> str:
-    full, empty = BAR_STYLES.get(style, BAR_STYLES["blocks"])
-    if style == "emoji":
-        full = {"ok": "🟩", "warn": "🟨", "crit": "🟥", "idle": "⬛"}.get(state, "🟩")
-    if pct is None:
-        return empty * width
-    fill = int(round(min(pct, 100) / 100 * width))
-    return full * fill + empty * (width - fill)
+    return bars.render(pct, width, style, state)
 
 
 @dataclass(frozen=True)
@@ -214,8 +199,8 @@ class Tray:
             rows.append(Row("sep"))
             return rows + self._action_rows()
 
-        style = self.cfg.get("menu_bar_style", "blocks")
-        width = 10 if style == "emoji" else 18
+        style = self.cfg.get("menu_bar_style", bars.DEFAULT)
+        width = bars.cells(style)
         th = s["thresholds"]
         tot = s["totals"]
 

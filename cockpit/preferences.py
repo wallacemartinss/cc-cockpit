@@ -16,7 +16,7 @@ import gi
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk  # noqa: E402
 
-from . import accounts, config  # noqa: E402
+from . import accounts, bars, config  # noqa: E402
 from .accounts import DATA_DIR  # noqa: E402
 from .i18n import t  # noqa: E402
 
@@ -65,9 +65,12 @@ class Preferences(Gtk.Window):
         self.metric = self._combo(general, 0, t("panel_shows"), "tray_metric", [
             ("block", t("block_of", h=block_hours)), ("week", t("days7")),
             ("today", t("today")), ("none", t("metric_none"))])
-        self.style = self._combo(general, 1, t("bar_style"), "menu_bar_style", [
-            ("blocks", t("style_blocks")), ("dots", t("style_dots")),
-            ("emoji", t("style_emoji"))])
+        # the list comes from bars.py, so a new style is added in one place, and
+        # each option carries a sample - the name alone does not show the look
+        self.style = self._combo(
+            general, 1, t("bar_style"), "menu_bar_style",
+            [(name, f"{t('style_' + name)}   {bars.sample(name)}") for name in bars.ORDER],
+            current=bars.canonical(self.cfg.get("menu_bar_style")))
         self.language = self._combo(general, 2, t("language_label"), "language", [
             ("auto", t("auto")), ("en", "English"),
             ("pt", "Português"), ("es", "Español")])
@@ -180,11 +183,11 @@ class Preferences(Gtk.Window):
         grid.attach(widget, 1, row, 1, 1)
 
     def _combo(self, grid: Gtk.Grid, row: int, label: str, key: str,
-               options: list[tuple[str, str]]) -> Gtk.ComboBoxText:
+               options: list[tuple[str, str]], current: str | None = None) -> Gtk.ComboBoxText:
         combo = Gtk.ComboBoxText()
         for value, text in options:
             combo.append(value, text)
-        combo.set_active_id(str(self.cfg.get(key, options[0][0])))
+        combo.set_active_id(str(current if current is not None else self.cfg.get(key, options[0][0])))
         if combo.get_active_id() is None:
             combo.set_active_id(options[0][0])
         self._attach(grid, row, label, combo)

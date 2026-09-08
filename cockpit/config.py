@@ -18,7 +18,10 @@ DEFAULTS: dict = {
     "limits": {"block_usd": None, "week_usd": None},
     # what shows next to the icon: block | week | today | none
     "tray_metric": "block",
-    # menu bar characters: blocks | dots | emoji (emoji is the colourful one)
+    # menu bar characters, see cockpit/bars.py:
+    #   blocks | shade | fine | dots | squares | line | braille
+    #   color_blocks | color_dots   (the two that carry the state as colour)
+    # "emoji" is the old name for color_blocks and still works.
     "menu_bar_style": "blocks",
     "tray_show_cost": True,
     "refresh_seconds": 20,

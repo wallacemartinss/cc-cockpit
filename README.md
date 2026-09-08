@@ -207,7 +207,8 @@ the file is written back on start, so new options show up there:
   "limits": { "block_usd": null, "week_usd": null },  // null = automatic
   "tray_metric": "block",        // block | week | today | none
   "tray_show_cost": true,
-  "menu_bar_style": "blocks",    // blocks | dots | emoji
+  "menu_bar_style": "blocks",    // blocks | shade | fine | dots | squares |
+                                 // line | braille | color_blocks | color_dots
   "refresh_seconds": 20,
   "plan_monthly_usd": null,      // e.g. 200 -> shows how many times the plan paid for itself
   "plan_name": "",
