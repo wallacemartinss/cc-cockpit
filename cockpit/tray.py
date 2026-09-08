@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import threading
 import webbrowser
+from dataclasses import dataclass
 
 import gi
 
@@ -69,11 +70,34 @@ def _bar(pct: float | None, width: int, style: str, state: str = "ok") -> str:
     return full * fill + empty * (width - fill)
 
 
+@dataclass(frozen=True)
+class Row:
+    """One menu line, described before any widget exists.
+
+    `shape` is what decides between a cheap label update and a full rebuild:
+    two menus with the same shape hold the same widgets in the same order, so
+    the panel never has to redraw the popup.
+    """
+    kind: str                                    # sep | row | session | action | picker
+    label: str = ""
+    icon: str | None = None
+    lines: tuple = ()                            # session detail, as a submenu
+    choices: tuple = ()                          # picker options: (id, label)
+    active: str = ""
+    action: object = None
+
+    @property
+    def shape(self) -> tuple:
+        return (self.kind, len(self.lines), len(self.choices))
+
+
 class Tray:
     def __init__(self) -> None:
         self.cfg = config.ensure()
         use_language(self.cfg.get("language"))
         self._rebuilding = False
+        self._items: list = []
+        self._shape: tuple = ()
         self.prefs = None
         self.timer = None
         self.seq = 0
@@ -165,29 +189,27 @@ class Tray:
         self.ind.set_icon_full(icon.render(pct, state, self.seq), APP_ID)
 
     # ---------- menu ----------
+    # Composing the menu and rendering it are kept apart on purpose. The menu is
+    # exported over dbusmenu and drawn by the panel, and there the two kinds of
+    # change are not equal: adding or removing an item is a layout change, so
+    # the shell tears the popup down and draws it again - that is the flicker,
+    # and the reason an expanded session folded shut every twenty seconds.
+    # Changing a label is a property update, applied in place. So a refresh that
+    # keeps the same shape only writes labels, and the open popup is left alone.
     def _build_menu(self, s: dict) -> None:
-        # Nothing here owns the timer or the settings window, and wiping them on
-        # every rebuild used to lose both: the timer id went missing so changing
-        # the refresh interval stacked a second one instead of replacing it, and
-        # the window reference went missing so Settings opened a new window on
-        # every click after the first refresh.
         self._rebuilding = True
         try:
-            self._fill_menu(s)
+            self._render(self._compose(s))
         finally:
             self._rebuilding = False
 
-    def _fill_menu(self, s: dict) -> None:
-        for child in self.menu.get_children():
-            self.menu.remove(child)
-
+    def _compose(self, s: dict) -> list[Row]:
+        rows: list[Row] = []
         if "error" in s:
-            self._row(t("read_error"), icon.dot("crit"))
-            self._row(s["error"][:70])
-            self._sep()
-            self._actions()
-            self.menu.show_all()
-            return
+            rows.append(Row("row", t("read_error"), icon.dot("crit")))
+            rows.append(Row("row", s["error"][:70]))
+            rows.append(Row("sep"))
+            return rows + self._action_rows()
 
         style = self.cfg.get("menu_bar_style", "blocks")
         width = 10 if style == "emoji" else 18
@@ -201,41 +223,37 @@ class Tray:
             if len(parts) > 1:
                 pct = part["block"].get("pct")
                 state = icon.state_for(pct, th["warn"], th["critical"])
-                self._row(part["account"]["label"],
-                          icon.dot(state, 22, pct if pct is not None else 0))
+                rows.append(Row("row", part["account"]["label"],
+                                icon.dot(state, 22, pct if pct is not None else 0)))
             # only the account on the panel gets the pace and projection lines;
             # a full block for each would push the totals off a small screen
-            self._windows(part, style, width, th,
-                          detail=len(parts) == 1 or part["account"]["id"] == primary_id)
-            self._sep()
+            rows += self._window_rows(part, style, width, th,
+                                      detail=len(parts) == 1
+                                      or part["account"]["id"] == primary_id)
+            rows.append(Row("sep"))
 
         # --- day, month, cache ---
-        self._row(f"{t('today')}   {_money(tot['today']['usd'])}   "
-                  f"{_toks(tot['today']['tokens'])}   {tot['today']['requests']} req",
-                  icon.dot("idle", 22))
-        self._row(f"{t('month')}   {_money(tot['month']['usd'])}   "
-                  + t("cache_hit_7d", p=f"{tot['last_7d']['cache_hit_pct']:.0f}"),
-                  icon.dot("idle", 22))
-        self._sep()
+        rows.append(Row("row", f"{t('today')}   {_money(tot['today']['usd'])}   "
+                        f"{_toks(tot['today']['tokens'])}   {tot['today']['requests']} req",
+                        icon.dot("idle", 22)))
+        rows.append(Row("row", f"{t('month')}   {_money(tot['month']['usd'])}   "
+                        + t("cache_hit_7d", p=f"{tot['last_7d']['cache_hit_pct']:.0f}"),
+                        icon.dot("idle", 22)))
+        rows.append(Row("sep"))
 
-        # --- live sessions, now with the context window from the statusline ---
+        # --- live sessions, with the context window from the statusline ---
         if not s["sessions"]:
-            self._row(t("no_sessions"), icon.dot("idle", 22))
+            rows.append(Row("row", t("no_sessions"), icon.dot("idle", 22)))
         for x in s["sessions"]:
             busy = x["status"] == "busy"
             ctx = (x.get("context") or {}).get("context_pct")
             bits = [x["name"], _money(x["usage"]["usd"])]
-            if len(s.get("parts") or [s]) > 1:
+            if len(parts) > 1:
                 bits.insert(1, x.get("account_label") or x.get("account") or "")
             if ctx is not None:
                 bits.append(f"ctx {ctx:.0f}%")
             elif not busy:
                 bits.append(t("idle_for", d=_dur(x["idle_s"])))
-            item = Gtk.ImageMenuItem.new_with_label("   ".join(bits))
-            item.set_image(Gtk.Image.new_from_file(
-                icon.dot("ok" if busy else "idle", 22, 100 if busy else None)))
-            item.set_always_show_image(True)
-            inner = Gtk.Menu()
             state_line = t("working") if busy else t("idle_for", d=_dur(x["idle_s"]))
             lines = [
                 x["cwd"],
@@ -245,76 +263,156 @@ class Tray:
             ]
             if ctx is not None:
                 lines.insert(2, f"{_bar(ctx, width, style)}   ctx {ctx:.0f}%")
-            for line in lines:
-                sub_item = Gtk.MenuItem(label=line)
-                sub_item.set_sensitive(False)
-                inner.append(sub_item)
-            item.set_submenu(inner)
-            self.menu.append(item)
+            rows.append(Row("session", "   ".join(bits),
+                            icon.dot("ok" if busy else "idle", 22, 100 if busy else None),
+                            tuple(lines)))
 
         # --- today's projects ---
         if s["projects_today"]:
-            self._sep()
+            rows.append(Row("sep"))
             top = s["projects_today"][:5]
             biggest = max(p["usd"] for p in top) or 1
             for p in top:
-                self._row(f"{_bar(p['usd'] / biggest * 100, 6, style)}   "
-                          f"{p['label'][:22]}   {_money(p['usd'])}")
+                rows.append(Row("row", f"{_bar(p['usd'] / biggest * 100, 6, style)}   "
+                                f"{p['label'][:22]}   {_money(p['usd'])}"))
 
-        self._sep()
-        self._actions()
-        self.menu.show_all()
+        rows.append(Row("sep"))
+        return rows + self._action_rows()
 
-    def _windows(self, part: dict, style: str, width: int, th: dict, detail: bool) -> None:
+    def _window_rows(self, part: dict, style: str, width: int, th: dict,
+                     detail: bool) -> list[Row]:
         b, w = part["block"], part["week"]
         titles = (t("block_of", h=f"{part['block_hours']:.0f}"),
                   t("week_window") if w.get("window_source") in ("official", "anchored")
                   else t("days7"))
+        rows: list[Row] = []
         for index, (info, title) in enumerate(zip((b, w), titles)):
             if index:
-                self._sep()          # the two windows are separate readings
+                rows.append(Row("sep"))     # the two windows are separate readings
             pct = info.get("pct")
             state = icon.state_for(pct, th["warn"], th["critical"])
             head = f"{title}   {pct:.0f}%" if pct is not None else title
-            self._row(head, icon.dot(state, 22, pct if pct is not None else 0))
-            self._row(f"{_bar(pct, width, style, state)}   {_money(info['usd'])}")
-            if not detail:
-                continue
-            self._row("   " + window_tail(info, is_block=info is b))
+            rows.append(Row("row", head, icon.dot(state, 22, pct if pct is not None else 0)))
+            rows.append(Row("row", f"{_bar(pct, width, style, state)}   {_money(info['usd'])}"))
+            if detail:
+                rows.append(Row("row", "   " + window_tail(info, is_block=info is b)))
+        return rows
 
-    def _actions(self) -> None:
-        self._account_picker()
-        self._action(t("open_dashboard"), lambda *_: webbrowser.open(self.url))
-        self._action(t("refresh_now"), self.refresh)
-
-        self._action(t("settings"), self._open_preferences)
-
-        self._action(t("quit"), lambda *_: Gtk.main_quit())
-
-    def _account_picker(self) -> None:
-        """Which account the panel label speaks for, without opening Settings."""
+    def _action_rows(self) -> list[Row]:
+        rows: list[Row] = []
         found = accounts.listed(self.cfg)
-        if len(found) < 2:
+        if len(found) > 1:
+            rows.append(Row("picker", t("panel_account"),
+                            choices=tuple((a.id, a.title) for a in found),
+                            active=accounts.primary(self.cfg).id))
+            rows.append(Row("sep"))
+        rows.append(Row("action", t("open_dashboard"),
+                        action=lambda *_: webbrowser.open(self.url)))
+        rows.append(Row("action", t("refresh_now"), action=self.refresh))
+        rows.append(Row("action", t("settings"), action=self._open_preferences))
+        rows.append(Row("action", t("quit"), action=lambda *_: Gtk.main_quit()))
+        return rows
+
+    # ---------- rendering ----------
+    def _render(self, rows: list[Row]) -> None:
+        shape = tuple(r.shape for r in rows)
+        if shape == self._shape and len(self._items) == len(rows):
+            for row, item in zip(rows, self._items):
+                self._update(row, item)
             return
-        current = accounts.primary(self.cfg).id
-        item = Gtk.MenuItem(label=t("panel_account"))
-        inner = Gtk.Menu()
-        group = None
-        for account in found:
-            choice = Gtk.RadioMenuItem(label=account.title)
-            if group is None:
-                group = choice
-            else:
-                choice.join_group(group)
-            choice.set_active(account.id == current)
-            choice.connect("toggled", self._pick_account, account.id)
-            inner.append(choice)
-        item.set_submenu(inner)
-        self.menu.append(item)
-        self._sep()
+        for child in self.menu.get_children():
+            self.menu.remove(child)
+        self._items = [self._create(row) for row in rows]
+        for item in self._items:
+            self.menu.append(item)
+        self._shape = shape
+        self.menu.show_all()
+
+    def _create(self, row: Row):
+        if row.kind == "sep":
+            return Gtk.SeparatorMenuItem()
+        if row.kind == "picker":
+            item = Gtk.MenuItem(label=row.label)
+            inner = Gtk.Menu()
+            group = None
+            choices = []
+            for account_id, label in row.choices:
+                choice = Gtk.RadioMenuItem(label=label)
+                if group is None:
+                    group = choice
+                else:
+                    choice.join_group(group)
+                choice.set_active(account_id == row.active)
+                choice.connect("toggled", self._pick_account, account_id)
+                inner.append(choice)
+                choices.append(choice)
+            item.set_submenu(inner)
+            item.cc_choices = choices
+            return item
+        if row.kind == "session":
+            item = Gtk.ImageMenuItem.new_with_label(row.label)
+            item.set_always_show_image(True)
+            self._set_icon(item, row.icon)
+            inner = Gtk.Menu()
+            subs = []
+            for line in row.lines:
+                sub = Gtk.MenuItem(label=line)
+                sub.set_sensitive(False)
+                inner.append(sub)
+                subs.append(sub)
+            item.set_submenu(inner)
+            item.cc_lines = subs
+            return item
+        if row.kind == "action":
+            item = Gtk.MenuItem(label=row.label)
+            item.cc_handler = item.connect("activate", row.action)
+            return item
+        # an informational line. Deliberately left sensitive: an insensitive
+        # item renders pale grey in GNOME and makes the whole menu look disabled
+        if row.icon:
+            item = Gtk.ImageMenuItem.new_with_label(row.label)
+            item.set_always_show_image(True)
+            self._set_icon(item, row.icon)
+        else:
+            item = Gtk.MenuItem(label=row.label)
+        item.connect("activate", lambda *_: None)
+        return item
+
+    def _update(self, row: Row, item) -> None:
+        """Writes a row onto an existing item, touching only what changed."""
+        if row.kind == "sep":
+            return
+        if item.get_label() != row.label:
+            item.set_label(row.label)
+        if row.icon:
+            self._set_icon(item, row.icon)
+        if row.kind == "session":
+            for line, sub in zip(row.lines, getattr(item, "cc_lines", [])):
+                if sub.get_label() != line:
+                    sub.set_label(line)
+        elif row.kind == "picker":
+            for (account_id, label), choice in zip(row.choices,
+                                                   getattr(item, "cc_choices", [])):
+                if choice.get_label() != label:
+                    choice.set_label(label)
+                choice.set_active(account_id == row.active)
+        elif row.kind == "action":
+            # the callback closes over self.url, which the port can change
+            handler = getattr(item, "cc_handler", None)
+            if handler is not None:
+                item.disconnect(handler)
+            item.cc_handler = item.connect("activate", row.action)
+
+    @staticmethod
+    def _set_icon(item, path: str) -> None:
+        """Only rewrite the image when the file actually changed."""
+        if getattr(item, "cc_icon", None) == path:
+            return
+        item.set_image(Gtk.Image.new_from_file(path))
+        item.cc_icon = path
 
     def _pick_account(self, widget, account_id: str) -> None:
-        # set_active() during the rebuild fires this too; only a real click counts
+        # set_active() during a rebuild fires this too; only a real click counts
         if self._rebuilding or not widget.get_active():
             return
         cfg = config.load()
@@ -344,26 +442,6 @@ class Tray:
             self.interval = seconds
             self.timer = GLib.timeout_add_seconds(seconds, self._tick)
         self.refresh()
-
-    def _row(self, text: str, icon_path: str | None = None) -> None:
-        """Informational line. Deliberately left sensitive: an insensitive item
-        renders pale grey in GNOME and makes the whole menu look disabled."""
-        if icon_path:
-            item = Gtk.ImageMenuItem.new_with_label(text)
-            item.set_image(Gtk.Image.new_from_file(icon_path))
-            item.set_always_show_image(True)
-        else:
-            item = Gtk.MenuItem(label=text)
-        item.connect("activate", lambda *_: None)
-        self.menu.append(item)
-
-    def _sep(self) -> None:
-        self.menu.append(Gtk.SeparatorMenuItem())
-
-    def _action(self, label: str, callback) -> None:
-        item = Gtk.MenuItem(label=label)
-        item.connect("activate", callback)
-        self.menu.append(item)
 
 
 def main() -> None:
