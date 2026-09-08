@@ -7,6 +7,7 @@ message shown when the binding is missing asks desktop.py for the right advice.
 """
 from __future__ import annotations
 
+import shutil
 import threading
 import webbrowser
 from dataclasses import dataclass
@@ -40,7 +41,7 @@ if _IND_NS == "AyatanaAppIndicator3":
 else:
     from gi.repository import AppIndicator3 as AppIndicator  # noqa: E402
 
-from . import accounts, config, icon, server, stats  # noqa: E402
+from . import accounts, config, icon, server, stats, terminal  # noqa: E402
 from .i18n import duration as _dur  # noqa: E402
 from .i18n import money as _money  # noqa: E402
 from .i18n import t  # noqa: E402
@@ -85,10 +86,12 @@ class Row:
     choices: tuple = ()                          # picker options: (id, label)
     active: str = ""
     action: object = None
+    cwd: str = ""                                # where a session's terminal opens
+    command: tuple = ()                          # what that terminal runs
 
     @property
     def shape(self) -> tuple:
-        return (self.kind, len(self.lines), len(self.choices))
+        return (self.kind, len(self.lines), len(self.choices), bool(self.command))
 
 
 class Tray:
@@ -265,7 +268,8 @@ class Tray:
                 lines.insert(2, f"{_bar(ctx, width, style)}   ctx {ctx:.0f}%")
             rows.append(Row("session", "   ".join(bits),
                             icon.dot("ok" if busy else "idle", 22, 100 if busy else None),
-                            tuple(lines)))
+                            tuple(lines), cwd=x["cwd"],
+                            command=self._resume_command(x)))
 
         # --- today's projects ---
         if s["projects_today"]:
@@ -278,6 +282,15 @@ class Tray:
 
         rows.append(Row("sep"))
         return rows + self._action_rows()
+
+    @staticmethod
+    def _resume_command(session: dict) -> tuple:
+        """How to reopen one conversation, or nothing when there is no terminal."""
+        if not terminal.available() or not session.get("cwd"):
+            return ()
+        claude = shutil.which("claude") or "claude"
+        session_id = session.get("session_id") or ""
+        return (claude, "--resume", session_id) if session_id else (claude,)
 
     def _window_rows(self, part: dict, style: str, width: int, th: dict,
                      detail: bool) -> list[Row]:
@@ -360,6 +373,13 @@ class Tray:
                 sub.set_sensitive(False)
                 inner.append(sub)
                 subs.append(sub)
+            if row.command:
+                inner.append(Gtk.SeparatorMenuItem())
+                launch = Gtk.MenuItem(label=t("open_terminal"))
+                launch.cc_handler = launch.connect(
+                    "activate", self._open_terminal, row.cwd, row.command)
+                inner.append(launch)
+                item.cc_launch = launch
             item.set_submenu(inner)
             item.cc_lines = subs
             return item
@@ -390,6 +410,12 @@ class Tray:
             for line, sub in zip(row.lines, getattr(item, "cc_lines", [])):
                 if sub.get_label() != line:
                     sub.set_label(line)
+            launch = getattr(item, "cc_launch", None)
+            if launch is not None and row.command:
+                # the slot can be reused by a different session between refreshes
+                launch.disconnect(launch.cc_handler)
+                launch.cc_handler = launch.connect(
+                    "activate", self._open_terminal, row.cwd, row.command)
         elif row.kind == "picker":
             for (account_id, label), choice in zip(row.choices,
                                                    getattr(item, "cc_choices", [])):
@@ -410,6 +436,10 @@ class Tray:
             return
         item.set_image(Gtk.Image.new_from_file(path))
         item.cc_icon = path
+
+    def _open_terminal(self, _widget, cwd: str, command: tuple) -> None:
+        if not terminal.open_in(cwd, command):
+            print(f"cc-cockpit: no terminal emulator found for {cwd}")
 
     def _pick_account(self, widget, account_id: str) -> None:
         # set_active() during a rebuild fires this too; only a real click counts

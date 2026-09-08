@@ -19,7 +19,7 @@ bundled — and can be pinned in the config file or with `--lang`.
 |---|---|
 | **5h block** | how much the current rate-limit window has consumed, time to reset, hourly pace, projection to the end of the block, and how long until the reference ceiling. The window starts at the exact timestamp of its first request — not rounded to the hour — which is what makes the reset match what the CLI reports |
 | **7 days / today / month** | rolling totals, as a percentage of your own historical peak |
-| **Open sessions** | every live CLI instance: name, project, `busy`/`idle`, uptime, RAM, pid, and what that session has consumed |
+| **Open sessions** | every live CLI instance: name, project, `busy`/`idle`, uptime, RAM, pid, and what that session has consumed. From the tray, each one opens a terminal in its own directory, resuming that conversation |
 | **Projects** | ranked by consumption across the whole history |
 | **Blocks, days and hours** | time series showing when you actually spend |
 | **Token mix** | input / output / cache write 5m / cache write 1h / cache read, with the cache hit rate |
