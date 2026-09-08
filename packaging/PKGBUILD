@@ -9,7 +9,7 @@ license=('MIT')
 depends=('python' 'python-gobject' 'python-cairo' 'libayatana-appindicator')
 makedepends=('python-build' 'python-installer' 'python-setuptools' 'python-wheel')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('SKIP')
+sha256sums=('d93471fc010a004217c62cd0bcdcec165ac6e688a3531fd23b9c9d6533f3dd9d')
 
 build() {
   cd "$pkgname-$pkgver"
