@@ -14,6 +14,6 @@ pkgbase = cc-cockpit
 	depends = python-cairo
 	depends = libayatana-appindicator
 	source = cc-cockpit-0.5.1.tar.gz::https://github.com/wallacemartinss/cc-cockpit/archive/refs/tags/v0.5.1.tar.gz
-	sha256sums = SKIP
+	sha256sums = 905429fee1476dbd09b76163e8d74abf793807218309bba5af1604bef8b4c937
 
 pkgname = cc-cockpit
