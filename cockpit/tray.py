@@ -70,11 +70,12 @@ class Row:
     two menus with the same shape hold the same widgets in the same order, so
     the panel never has to redraw the popup.
     """
-    kind: str                        # sep | row | launch | group | action | picker
+    kind: str                 # sep | row | fold | launch | group | action | picker
     label: str = ""
     icon: str | None = None
     choices: tuple = ()                          # picker options: (id, label)
     items: tuple = ()                            # group entries: (label, cwd, command)
+    detail: tuple = ()                           # fold entries: plain lines, no icon
     active: str = ""
     action: object = None
     cwd: str = ""                                # where a session's terminal opens
@@ -82,7 +83,8 @@ class Row:
 
     @property
     def shape(self) -> tuple:
-        return (self.kind, len(self.choices), len(self.items), bool(self.command))
+        return (self.kind, len(self.choices), len(self.items), len(self.detail),
+                bool(self.command))
 
 
 class Tray:
@@ -212,23 +214,23 @@ class Tray:
 
         # --- the limit windows, per account: they cannot be merged into one ---
         parts = s.get("parts") or [s]
-        primary_id = accounts.primary(self.cfg).id
-        for part in parts:
-            if len(parts) > 1:
-                pct = part["block"].get("pct")
-                state = icon.state_for(pct, th["warn"], th["critical"])
-                rows.append(Row("row", part["account"]["label"],
-                                icon.dot(state, 22, pct if pct is not None else 0)))
-            # only the account on the panel gets the pace and projection lines;
-            # a full block for each would push the totals off a small screen
-            rows += self._window_rows(part, style, width, th,
-                                      detail=len(parts) == 1
-                                      or part["account"]["id"] == primary_id)
+        # More than one account is what pushes this menu past the height of the
+        # screen - each one costs seven rows, and there is no scrolling to fall
+        # back on. So a second account switches the whole menu to a compact
+        # layout: every account folds into one line, and so does the project
+        # ranking. With one account nothing changes.
+        compact = len(parts) > 1
+        if compact:
+            for part in parts:
+                rows.append(self._account_fold(part, style, width, th))
+        else:
+            part = parts[0]
+            rows += self._window_rows(part, style, width, th, detail=True)
             login = part.get("login")
             if login:
                 rows.append(Row("row", _login_line(login),
                                 icon.dot(login["state"], 22)))
-            rows.append(Row("sep"))
+        rows.append(Row("sep"))
 
         # --- day, month, cache ---
         rows.append(Row("row", f"{t('today')}   {_money(tot['today']['usd'])}   "
@@ -295,9 +297,12 @@ class Tray:
             rows.append(Row("sep"))
             top = s["projects_today"][:5]
             biggest = max(p["usd"] for p in top) or 1
-            for p in top:
-                rows.append(Row("row", f"{_bar(p['usd'] / biggest * 100, 6, style)}   "
-                                f"{p['label'][:22]}   {_money(p['usd'])}"))
+            lines = [f"{_bar(p['usd'] / biggest * 100, 6, style)}   "
+                     f"{p['label'][:22]}   {_money(p['usd'])}" for p in top]
+            if compact:
+                rows.append(Row("fold", t("projects_today"), detail=tuple(lines)))
+            else:
+                rows += [Row("row", line) for line in lines]
 
         rows.append(Row("sep"))
         return rows + self._action_rows()
@@ -311,12 +316,41 @@ class Tray:
         session_id = session.get("session_id") or ""
         return (claude, "--resume", session_id) if session_id else (claude,)
 
+    def _account_fold(self, part: dict, style: str, width: int, th: dict) -> Row:
+        """One account as a single line, opening into its own detail.
+
+        The heading carries both percentages, because that is the reason to look
+        at all; the bar, the pace and the projection are a click away. No icon
+        anywhere here - see ADR-0006 - so the state dot the expanded layout used
+        is gone, and the panel ring, which already takes the colour of whichever
+        account is worst off, is what still raises the alarm.
+        """
+        b, w = part["block"], part["week"]
+        pcts = " · ".join(f"{i['pct']:.0f}%" for i in (b, w) if i.get("pct") is not None)
+        label = part["account"]["label"]
+        detail: list[str] = []
+        for info, title in zip((b, w), self._window_titles(part)):
+            pct = info.get("pct")
+            state = icon.state_for(pct, th["warn"], th["critical"])
+            detail.append(f"{title}   {pct:.0f}%" if pct is not None else title)
+            detail.append(f"{_bar(pct, width, style, state)}   {_money(info['usd'])}")
+            detail.append(window_tail(info, is_block=info is b))
+        login = part.get("login")
+        if login:
+            detail.append(_login_line(login))
+        return Row("fold", f"{label}   {pcts}" if pcts else label, detail=tuple(detail))
+
+    @staticmethod
+    def _window_titles(part: dict) -> tuple:
+        w = part["week"]
+        return (t("block_of", h=f"{part['block_hours']:.0f}"),
+                t("week_window") if w.get("window_source") in ("official", "anchored")
+                else t("days7"))
+
     def _window_rows(self, part: dict, style: str, width: int, th: dict,
                      detail: bool) -> list[Row]:
         b, w = part["block"], part["week"]
-        titles = (t("block_of", h=f"{part['block_hours']:.0f}"),
-                  t("week_window") if w.get("window_source") in ("official", "anchored")
-                  else t("days7"))
+        titles = self._window_titles(part)
         rows: list[Row] = []
         for index, (info, title) in enumerate(zip((b, w), titles)):
             if index:
@@ -383,6 +417,20 @@ class Tray:
             item.set_submenu(inner)
             item.cc_choices = choices
             return item
+        if row.kind == "fold":
+            # ADR-0006: an item has either an icon or a submenu. Nothing in this
+            # subtree carries one - not the parent, not a line - so it opens.
+            item = Gtk.MenuItem(label=row.label)
+            inner = Gtk.Menu()
+            lines = []
+            for text in row.detail:
+                line = Gtk.MenuItem(label=text)
+                line.connect("activate", lambda *_: None)
+                inner.append(line)
+                lines.append(line)
+            item.set_submenu(inner)
+            item.cc_detail = lines
+            return item
         if row.kind == "group":
             item = Gtk.MenuItem(label=row.label)
             inner = Gtk.Menu()
@@ -426,7 +474,11 @@ class Tray:
             item.set_label(row.label)
         if row.icon:
             self._set_icon(item, row.icon)
-        if row.kind == "group":
+        if row.kind == "fold":
+            for text, line in zip(row.detail, getattr(item, "cc_detail", [])):
+                if line.get_label() != text:
+                    line.set_label(text)
+        elif row.kind == "group":
             for (label, cwd, command), entry in zip(row.items,
                                                     getattr(item, "cc_entries", [])):
                 if entry.get_label() != label:
