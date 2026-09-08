@@ -6,7 +6,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from . import accounts, anchors, auth, calibration, config, i18n, panel
+from . import __version__, accounts, anchors, auth, calibration, config, i18n, panel
 from .accounts import Account
 from .collector import Event, load_events, refresh
 from .sessions import live_sessions, recent_sessions
@@ -341,6 +341,7 @@ def summary(events: list[Event] | None = None, cfg: dict | None = None,
 
     return {
         "generated_at": now,
+        "version": __version__,
         "account": acct.as_dict(),
         "login": auth.status(acct, now),
         "block_hours": block_hours,

@@ -27,6 +27,7 @@
   h1{font-size:19px;margin:0;letter-spacing:-.2px}
   h1 span{color:var(--accent)}
   .sub{color:var(--muted);font-size:12.5px}
+  .meta{margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:1px}
   .pill{background:var(--panel);border:1px solid var(--line);border-radius:999px;
         padding:3px 11px;font-size:12px;color:var(--muted)}
   .pill b{color:var(--fg);font-weight:600}
@@ -106,7 +107,10 @@
     <span class="pill" id="plan">—</span>
     <span class="pill" id="live">—</span>
     <span class="pill" id="login" hidden></span>
-    <span class="sub" id="upd" style="margin-left:auto"></span>
+    <div class="meta">
+      <span class="sub" id="upd"></span>
+      <span class="sub mono" id="ver"></span>
+    </div>
   </header>
 
   <div class="tabs" id="tabs" role="tablist" hidden></div>
@@ -446,6 +450,9 @@ async function tick(){
   }).join(' · ');
   $('#upd').textContent = t('updated',
     {time: new Date(s.generated_at*1000).toLocaleTimeString(LOCALE)});
+  // which build is answering: the page and the payload come from the same
+  // process, so this is the version actually serving the dashboard
+  $('#ver').textContent = 'v' + s.version;
 
   drawTabs();
 
