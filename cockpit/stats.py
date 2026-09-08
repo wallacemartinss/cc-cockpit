@@ -9,7 +9,7 @@ from pathlib import Path
 from . import accounts, anchors, auth, calibration, config, i18n, panel
 from .accounts import Account
 from .collector import Event, load_events, refresh
-from .sessions import live_sessions
+from .sessions import live_sessions, recent_sessions
 
 HOUR = 3600.0
 
@@ -325,6 +325,16 @@ def summary(events: list[Event] | None = None, cfg: dict | None = None,
         item["usage"] = b.as_dict() if b else Bucket().as_dict()
         item["context"] = contexts.get(item["session_id"], {})
 
+    # what was open before the terminal was closed. The transcripts say which
+    # conversations exist; only our own history knows what each one cost.
+    recent_limit = int(cfg.get("recent_sessions") or 0)
+    recent = recent_sessions(acct, limit=recent_limit,
+                             skip={item["session_id"] for item in live})
+    for item in recent:
+        b = per_session.get(item["session_id"])
+        item["usage"] = b.as_dict() if b else Bucket().as_dict()
+        item["project"] = _label(item["cwd"])
+
     plan = cfg.get("plan_monthly_usd")
     value = totals["month"].usd
     roi = round(value / plan, 1) if plan else None
@@ -360,6 +370,8 @@ def summary(events: list[Event] | None = None, cfg: dict | None = None,
         "efforts": dict(sorted(efforts.items(), key=lambda kv: -kv[1])),
         "subagents": sidechain.as_dict(),
         "sessions": live,
+        "recent": recent,
+        "recent_limit": recent_limit,
         "plan": {"monthly_usd": plan, "name": cfg.get("plan_name") or "", "value_this_month": round(value, 2), "roi": roi},
         "local_currency": cfg.get("local_currency"),
         "i18n": {"language": i18n.language(), "tag": i18n.tag(), "catalog": i18n.catalog()},
@@ -417,6 +429,12 @@ def combined(cfg: dict | None = None, parts: list[dict] | None = None) -> dict:
     out["per_account"] = gauges
     # each part already resolved its own sessions, with the right usage attached
     out["sessions"] = [s for p in parts for s in p["sessions"]]
+    # the recent lists are per account and already capped; merging them means
+    # sorting by time again, or the second account never reaches the top
+    limit = int(cfg.get("recent_sessions") or 0)
+    out["recent"] = sorted((r for p in parts for r in p.get("recent") or []),
+                           key=lambda r: -r["last_at"])[:limit]
+    out["recent_limit"] = limit
     return out
 
 

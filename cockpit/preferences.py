@@ -77,10 +77,14 @@ class Preferences(Gtk.Window):
         self.show_cost = Gtk.Switch(halign=Gtk.Align.START)
         self.show_cost.set_active(bool(self.cfg.get("tray_show_cost", True)))
         self._attach(general, 3, t("show_cost"), self.show_cost)
-        self.refresh_seconds = self._spin(general, 4, t("refresh_every"),
+        # 0 is a real answer here - it takes the list out of the menu, the
+        # dashboard and the report at once
+        self.recent = self._spin(general, 4, t("recent_count"),
+                                 self.cfg.get("recent_sessions", 5), 0, 20)
+        self.refresh_seconds = self._spin(general, 5, t("refresh_every"),
                                           self.cfg.get("refresh_seconds", 20), 5, 600,
                                           suffix=t("seconds"))
-        self.port = self._spin(general, 5, t("dashboard_port"),
+        self.port = self._spin(general, 6, t("dashboard_port"),
                                self.cfg.get("dashboard_port", 8765), 1024, 65535)
 
         # The name is editable here; the id is not. An id names accounts/<id>/,
@@ -218,6 +222,7 @@ class Preferences(Gtk.Window):
         cfg["menu_bar_style"] = self.style.get_active_id()
         cfg["language"] = self.language.get_active_id()
         cfg["tray_show_cost"] = self.show_cost.get_active()
+        cfg["recent_sessions"] = int(self.recent.get_value())
         cfg["refresh_seconds"] = int(self.refresh_seconds.get_value())
         cfg["dashboard_port"] = int(self.port.get_value())
         cfg["limits"] = {

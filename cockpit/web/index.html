@@ -16,6 +16,9 @@
            --fg:#1a1d23; --muted:#69707e; }
   }
   *{box-sizing:border-box}
+  /* a card body carrying its own display: (.rows is a flex column) would beat
+     the user-agent rule and stay on screen while marked hidden */
+  [hidden]{display:none !important}
   body{margin:0;background:var(--bg);color:var(--fg);
        font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
   a{color:inherit}
@@ -58,6 +61,11 @@
   .sess .nm{font-weight:600}
   .sess .pth{font-size:12px;color:var(--muted);word-break:break-all}
   .right{margin-left:auto;text-align:right;white-space:nowrap}
+  .cmd{appearance:none;background:var(--panel);border:1px solid var(--line);color:var(--muted);
+       font:11px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;padding:2px 7px;
+       border-radius:6px;margin-top:6px;cursor:pointer;max-width:100%;
+       text-align:left;word-break:break-all}
+  .cmd:hover{color:var(--fg);border-color:var(--accent)}
   svg{display:block;overflow:visible}
   .lbl{fill:var(--muted);font-size:9.5px}
   footer{margin-top:26px;color:var(--muted);font-size:12px;text-align:center}
@@ -84,6 +92,11 @@
   .heat .lbl-y{font-size:10.5px;color:var(--muted);padding-right:6px;text-align:right}
   .heat .lbl-x{font-size:9.5px;color:var(--muted);text-align:center}
   .delta{font-size:12px;margin-top:3px}
+  h2.fold{cursor:pointer;user-select:none;display:flex;align-items:center;gap:8px}
+  h2.fold:hover{color:var(--fg)}
+  h2.fold .chev{font-size:9px;line-height:1;transition:transform .15s ease}
+  h2.fold[aria-expanded="true"] .chev{transform:rotate(90deg)}
+  h2.fold[aria-expanded="false"]{margin-bottom:0}
 </style>
 </head>
 <body>
@@ -103,7 +116,7 @@
   <div class="grid g4" style="margin-top:14px" id="kpis"></div>
 
   <div class="card" style="margin-top:14px">
-    <h2 data-t="card_official"></h2>
+    <h2 data-fold="official"><span data-t="card_official"></span></h2>
     <div id="official"></div>
   </div>
 
@@ -113,7 +126,8 @@
   </div>
 
   <div class="card" style="margin-top:14px">
-    <h2><span data-t="card_heatmap"></span> <span class="muted" id="heat-note"></span></h2>
+    <h2 data-fold="heatmap"><span data-t="card_heatmap"></span>
+      <span class="muted" id="heat-note"></span></h2>
     <div id="heatmap"></div>
   </div>
 
@@ -128,16 +142,22 @@
     </div>
   </div>
 
-  <div class="grid g2" style="margin-top:14px">
-    <div class="card">
-      <h2><span data-t="card_projects"></span>
-        <span class="scope" id="proj-scope"></span></h2>
-      <table id="projects"></table>
-    </div>
-    <div class="card">
-      <h2 id="h-blocks"></h2>
-      <div id="blocks"></div>
-    </div>
+  <div class="card" style="margin-top:14px" id="recent-card">
+    <h2 data-fold="recent" data-fold-default="closed">
+      <span data-t="recent_sessions"></span>
+      <span class="muted" id="recent-note"></span></h2>
+    <div class="rows" id="recent"></div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <h2><span data-t="card_projects"></span>
+      <span class="scope" id="proj-scope"></span></h2>
+    <table id="projects"></table>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <h2 id="h-blocks"></h2>
+    <div id="blocks"></div>
   </div>
 
   <div class="grid g3" style="margin-top:14px">
@@ -174,6 +194,43 @@ function dur(s){
   if(d) return d+'d '+h+'h';
   if(h) return h+'h '+String(m).padStart(2,'0')+'m';
   return m+'m';
+}
+// Folding cards. The state is per viewer and per card, so a chart someone
+// keeps closed stays closed across reloads; only the card that ships closed
+// says so in the markup.
+function initFolds(){
+  document.querySelectorAll('h2[data-fold]').forEach(h => {
+    const body = h.nextElementSibling;
+    if(!body) return;
+    const key = 'cc-cockpit.fold.' + h.dataset.fold;
+    let open = h.dataset.foldDefault !== 'closed';
+    try { const saved = localStorage.getItem(key); if(saved !== null) open = saved === '1'; }
+    catch(e) {}
+    h.classList.add('fold');
+    h.setAttribute('role', 'button');
+    h.tabIndex = 0;
+    h.insertAdjacentHTML('afterbegin', '<span class="chev" aria-hidden="true">\u25B6</span>');
+    const apply = () => { body.hidden = !open; h.setAttribute('aria-expanded', open); };
+    const toggle = () => {
+      open = !open;
+      try { localStorage.setItem(key, open ? '1' : '0'); } catch(e) {}
+      apply();
+    };
+    apply();
+    h.addEventListener('click', toggle);
+    h.addEventListener('keydown', e => {
+      if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); toggle(); }
+    });
+  });
+}
+async function copy(text){
+  try { await navigator.clipboard.writeText(text); return true; } catch(e) {}
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    const ok = document.execCommand('copy'); ta.remove(); return ok;
+  } catch(e) { return false; }
 }
 function color(pct, th){
   if(pct==null) return 'var(--blue)';
@@ -464,6 +521,43 @@ async function tick(){
         }${toks(x.usage.tokens)} · ${dur(x.uptime_s)} · pid ${x.pid}</div></div>
     </div>`).join('') : `<div class="muted">${esc(t('no_sessions'))}</div>`;
 
+  // the browser cannot open a terminal, so what it offers is the line that
+  // reopens the conversation - the session id is the part nothing else knows
+  const recent = s.recent || [];
+  $('#recent-card').hidden = !s.recent_limit;      // 0 means the user turned it off
+  $('#recent-note').textContent = recent.length ? '· ' + recent.length : '';
+  $('#recent').innerHTML = recent.length ? recent.map(x=>{
+    const cmd = `cd ${x.cwd} && claude --resume ${x.session_id}`;
+    return `<div class="sess">
+      <div style="min-width:0">
+        <div class="nm">${esc(x.title || t('untitled'))}</div>
+        <div class="pth">${esc(x.project)} · ${esc(t('ago', {d: dur(x.ago_s)}))}${
+          ACCOUNTS && ACCOUNTS.multi ? ' · ' + esc(x.account_label||x.account) : ''}</div>
+        <button class="cmd" data-cmd="${esc(cmd)}" title="${esc(t('copy_resume'))}"
+          >claude --resume ${esc(x.session_id.slice(0,8))}…</button>
+      </div>
+      <div class="right"><div class="mono">${money(x.usage.usd)}</div>
+        <div class="muted" style="font-size:11.5px">${toks(x.usage.tokens)} · ${
+          nf().format(x.usage.requests)} ${t('th_req')}</div></div>
+    </div>`;
+  }).join('') : `<div class="muted">${esc(t('no_recent'))}</div>`;
+  $('#recent').querySelectorAll('button.cmd').forEach(el => el.onclick = async () => {
+    if(await copy(el.dataset.cmd)){
+      const was = el.innerHTML;
+      el.textContent = t('copied');
+      setTimeout(() => { el.innerHTML = was; }, 1600);
+      return;
+    }
+    // nothing to write the clipboard with: show the whole line and select it,
+    // so the keyboard can still take it
+    el.textContent = el.dataset.cmd;
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const sel = getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  });
+
   $('#proj-scope').innerHTML = [['today', t('scope_today')], ['all', t('scope_all')]]
     .map(([k,l]) => `<button data-scope="${k}" aria-pressed="${k===PROJ_SCOPE}">${esc(l)}</button>`).join('');
   $('#proj-scope').querySelectorAll('button').forEach(el => el.onclick = () => {
@@ -473,14 +567,26 @@ async function tick(){
   });
   const plist = PROJ_SCOPE === 'today' ? (s.projects_today || []) : s.projects;
   const pmax = Math.max(...plist.map(p=>p.usd), 1);
-  $('#projects').innerHTML = `<tr><th>${esc(t('th_project'))}</th><th class="r">${esc(t('th_tokens'))}</th><th class="r">USD</th><th style="width:110px"></th></tr>` +
+  // the share is of everything spent, which the bar cannot say: the bar is
+  // relative to the biggest project, so a table of small ones would all look full
+  const psum = plist.reduce((a,p)=>a+p.usd, 0) || 1;
+  $('#projects').innerHTML = `<tr><th>${esc(t('th_project'))}</th>
+      <th class="r">${esc(t('th_tokens'))}</th><th class="r">${esc(t('th_req'))}</th>
+      <th class="r">${esc(t('sessions'))}</th><th class="r">${esc(t('th_last'))}</th>
+      <th class="r">USD</th><th style="width:26%"></th></tr>` +
     (plist.length ? plist : []).slice(0,12).map(p=>`<tr>
       <td title="${esc(p.cwd)}">${esc(p.label)}</td>
       <td class="r mono muted">${toks(p.tokens)}</td>
-      <td class="r mono">${money(p.usd)}</td>
+      <td class="r mono muted">${nf().format(p.requests)}</td>
+      <td class="r mono muted">${nf().format(p.sessions)}</td>
+      <td class="r mono muted">${p.last ? t('ago', {d: dur(s.generated_at - p.last)}) : '—'}</td>
+      <td class="r mono">${money(p.usd)}
+        <span class="muted">${(p.usd/psum*100).toFixed(0)}%</span></td>
       <td><div class="bar"><i style="width:${p.usd/pmax*100}%"></i></div></td></tr>`).join('');
 
-  $('#blocks').innerHTML = bars(s.blocks.slice(-14), {
+  // the card runs the full width now: the room goes into more history rather
+  // than into gaps between the same fourteen bars
+  $('#blocks').innerHTML = bars(s.blocks.slice(-28), {
     value:x=>x.usd, height:90,
     label:x=>{const d=new Date(x.start*1000);
       return String(d.getDate()).padStart(2,'0')+' '+String(d.getHours()).padStart(2,'0')+'h';},
@@ -511,6 +617,7 @@ async function safeTick(){
     $('#foot').textContent = 'render error: ' + err.message;
   }
 }
+initFolds();
 safeTick(); setInterval(safeTick, 20000);
 </script>
 </body>

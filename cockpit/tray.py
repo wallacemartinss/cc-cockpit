@@ -70,11 +70,11 @@ class Row:
     two menus with the same shape hold the same widgets in the same order, so
     the panel never has to redraw the popup.
     """
-    kind: str                                    # sep | row | session | action | picker
+    kind: str                        # sep | row | launch | group | action | picker
     label: str = ""
     icon: str | None = None
-    lines: tuple = ()                            # session detail, as a submenu
     choices: tuple = ()                          # picker options: (id, label)
+    items: tuple = ()                            # group entries: (label, cwd, command)
     active: str = ""
     action: object = None
     cwd: str = ""                                # where a session's terminal opens
@@ -82,7 +82,7 @@ class Row:
 
     @property
     def shape(self) -> tuple:
-        return (self.kind, len(self.lines), len(self.choices), bool(self.command))
+        return (self.kind, len(self.choices), len(self.items), bool(self.command))
 
 
 class Tray:
@@ -239,9 +239,19 @@ class Tray:
                         icon.dot("idle", 22)))
         rows.append(Row("sep"))
 
-        # --- live sessions, with the context window from the statusline ---
+        # --- live sessions ---
+        # These used to expand into a submenu holding the path, the context bar,
+        # requests and the pid. GNOME's AppIndicator extension opens that
+        # submenu and draws nothing inside it - the item is exported correctly
+        # (children present, visible, children-display: submenu, stable layout
+        # revision, no error logged), the shell simply renders an empty popup.
+        # So the detail was unreachable, not merely cramped; it lives in the
+        # dashboard, which has room for it, and the row here does the one thing
+        # a tray menu is good at, which is act.
         if not s["sessions"]:
             rows.append(Row("row", t("no_sessions"), icon.dot("idle", 22)))
+        else:
+            rows.append(Row("row", t("card_sessions")))
         for x in s["sessions"]:
             busy = x["status"] == "busy"
             ctx = (x.get("context") or {}).get("context_pct")
@@ -250,21 +260,35 @@ class Tray:
                 bits.insert(1, x.get("account_label") or x.get("account") or "")
             if ctx is not None:
                 bits.append(f"ctx {ctx:.0f}%")
-            elif not busy:
-                bits.append(t("idle_for", d=_dur(x["idle_s"])))
-            state_line = t("working") if busy else t("idle_for", d=_dur(x["idle_s"]))
-            lines = [
-                x["cwd"],
-                f"{state_line} · {t('open_for', d=_dur(x['uptime_s']))}",
-                t("requests_tokens", n=x["usage"]["requests"], tok=_toks(x["usage"]["tokens"])),
-                t("pid_line", pid=x["pid"], mb=f"{x['rss_mb']:.0f}", version=x["version"]),
-            ]
-            if ctx is not None:
-                lines.insert(2, f"{_bar(ctx, width, style)}   ctx {ctx:.0f}%")
-            rows.append(Row("session", "   ".join(bits),
+            bits.append(t("working") if busy else t("idle_for", d=_dur(x["idle_s"])))
+            command = self._resume_command(x)
+            rows.append(Row("launch" if command else "row", "   ".join(bits),
                             icon.dot("ok" if busy else "idle", 22, 100 if busy else None),
-                            tuple(lines), cwd=x["cwd"],
-                            command=self._resume_command(x)))
+                            cwd=x["cwd"], command=command))
+
+        # --- conversations to go back to ---
+        # A closed terminal used to take its session with it: the id is only in
+        # the transcript, so there was no way back except `claude --resume` and
+        # a list to read it from. The heading is what tells this group apart
+        # from the live one above - both are one click from a terminal, and
+        # only these are not already running somewhere.
+        # These fold into a dropdown, where the live ones stay in the open: the
+        # menu was running off the bottom of the screen, and this is the group
+        # you consult, not the one you watch. Nothing in this subtree carries an
+        # icon - the submenus GNOME refused to draw were all ImageMenuItems, and
+        # a plain one is the only shape left worth trying.
+        recent = s.get("recent") or []
+        if recent:
+            entries = []
+            for x in recent:
+                bits = [(x["title"] or t("untitled"))[:34]]
+                if len(parts) > 1:
+                    bits.append(x.get("account_label") or x.get("account") or "")
+                bits.append(x["project"][:18])
+                bits.append(t("ago", d=_dur(x["ago_s"])))
+                entries.append(("   ".join(bits), x["cwd"], self._resume_command(x)))
+            rows.append(Row("sep"))
+            rows.append(Row("group", t("recent_sessions"), items=tuple(entries)))
 
         # --- today's projects ---
         if s["projects_today"]:
@@ -359,26 +383,25 @@ class Tray:
             item.set_submenu(inner)
             item.cc_choices = choices
             return item
-        if row.kind == "session":
+        if row.kind == "group":
+            item = Gtk.MenuItem(label=row.label)
+            inner = Gtk.Menu()
+            entries = []
+            for label, cwd, command in row.items:
+                entry = Gtk.MenuItem(label=label)
+                entry.cc_handler = entry.connect(
+                    "activate", self._open_terminal, cwd, command)
+                inner.append(entry)
+                entries.append(entry)
+            item.set_submenu(inner)
+            item.cc_entries = entries
+            return item
+        if row.kind == "launch":
             item = Gtk.ImageMenuItem.new_with_label(row.label)
             item.set_always_show_image(True)
             self._set_icon(item, row.icon)
-            inner = Gtk.Menu()
-            subs = []
-            for line in row.lines:
-                sub = Gtk.MenuItem(label=line)
-                sub.set_sensitive(False)
-                inner.append(sub)
-                subs.append(sub)
-            if row.command:
-                inner.append(Gtk.SeparatorMenuItem())
-                launch = Gtk.MenuItem(label=t("open_terminal"))
-                launch.cc_handler = launch.connect(
-                    "activate", self._open_terminal, row.cwd, row.command)
-                inner.append(launch)
-                item.cc_launch = launch
-            item.set_submenu(inner)
-            item.cc_lines = subs
+            item.cc_handler = item.connect(
+                "activate", self._open_terminal, row.cwd, row.command)
             return item
         if row.kind == "action":
             item = Gtk.MenuItem(label=row.label)
@@ -403,22 +426,28 @@ class Tray:
             item.set_label(row.label)
         if row.icon:
             self._set_icon(item, row.icon)
-        if row.kind == "session":
-            for line, sub in zip(row.lines, getattr(item, "cc_lines", [])):
-                if sub.get_label() != line:
-                    sub.set_label(line)
-            launch = getattr(item, "cc_launch", None)
-            if launch is not None and row.command:
-                # the slot can be reused by a different session between refreshes
-                launch.disconnect(launch.cc_handler)
-                launch.cc_handler = launch.connect(
-                    "activate", self._open_terminal, row.cwd, row.command)
+        if row.kind == "group":
+            for (label, cwd, command), entry in zip(row.items,
+                                                    getattr(item, "cc_entries", [])):
+                if entry.get_label() != label:
+                    entry.set_label(label)
+                # the slot is reused by a different session between refreshes
+                entry.disconnect(entry.cc_handler)
+                entry.cc_handler = entry.connect(
+                    "activate", self._open_terminal, cwd, command)
         elif row.kind == "picker":
             for (account_id, label), choice in zip(row.choices,
                                                    getattr(item, "cc_choices", [])):
                 if choice.get_label() != label:
                     choice.set_label(label)
                 choice.set_active(account_id == row.active)
+        elif row.kind == "launch":
+            # the slot can be reused by a different session between refreshes
+            handler = getattr(item, "cc_handler", None)
+            if handler is not None:
+                item.disconnect(handler)
+            item.cc_handler = item.connect(
+                "activate", self._open_terminal, row.cwd, row.command)
         elif row.kind == "action":
             # the callback closes over self.url, which the port can change
             handler = getattr(item, "cc_handler", None)

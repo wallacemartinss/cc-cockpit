@@ -24,6 +24,9 @@ DEFAULTS: dict = {
     # "emoji" is the old name for color_blocks and still works.
     "menu_bar_style": "blocks",
     "tray_show_cost": True,
+    # how many past conversations to offer for resuming, in the tray, the
+    # dashboard and the report. 0 turns the list off.
+    "recent_sessions": 5,
     "refresh_seconds": 20,
     # what the plan costs per month - only used to show how much it returns
     "plan_monthly_usd": None,

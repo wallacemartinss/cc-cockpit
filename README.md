@@ -25,7 +25,8 @@ bundled — and can be pinned in the config file or with `--lang`.
 |---|---|
 | **5h block** | how much the current rate-limit window has consumed, time to reset, hourly pace, projection to the end of the block, and how long until the reference ceiling. The window starts at the exact timestamp of its first request — not rounded to the hour — which is what makes the reset match what the CLI reports |
 | **7 days / today / month** | rolling totals, as a percentage of your own historical peak |
-| **Open sessions** | every live CLI instance: name, project, `busy`/`idle`, uptime, RAM, pid, and what that session has consumed. From the tray, each one opens a terminal in its own directory, resuming that conversation |
+| **Open sessions** | every live CLI instance: name, project, `busy`/`idle`, uptime, RAM, pid, and what that session has consumed. In the tray, clicking one opens a terminal in its own directory, resuming that conversation |
+| **Recent sessions** | the last conversations you can go back to, with their title, project and age. Closing a terminal used to take its session with it — the id lives only in the transcript. The tray folds them into one dropdown, a click away from a terminal; the dashboard hands you the `claude --resume` line; the report prints it |
 | **Projects** | ranked by consumption across the whole history |
 | **Blocks, days and hours** | time series showing when you actually spend |
 | **Official limits over time** | the real 5h and 7d percentages plotted as they were reported, breaking the line where a window resets rather than drawing a fall that never happened |
@@ -41,20 +42,32 @@ as a weight unit for consumption and shows how much the plan returns.
 ## The three surfaces
 
 **The tray menu** is the glance. One section per account with its 5h and 7d
-windows, then the day, the month, the live sessions and today's projects. A
-session expands into its own detail — directory, context window, requests, pid,
-memory — and offers to open a terminal there, resuming that conversation.
-*Shown on the panel* picks which account the label speaks for.
+windows, then the day, the month, the sessions open, the ones you can resume and
+today's projects. Every session line is a button: clicking it opens a terminal in
+that directory resuming that conversation. *Shown on the panel* picks which
+account the label speaks for.
+
+A session line never opens a submenu, and that is not a style choice: on GNOME's
+AppIndicator extension an item that carries an icon — every session line does,
+for the state dot — exports its submenu correctly and then renders it empty. An
+item without an icon submenus fine, which is why *Recent sessions* folds into a
+dropdown and the open ones do not. The detail a session used to expand into —
+directory, context window, requests, pid, memory — lives in the dashboard, which
+has room for it.
 
 It refreshes every twenty seconds without redrawing. The menu is exported over
 dbusmenu and the panel draws it, so adding or removing an item tears the popup
 down while you are reading it; a refresh that keeps the same shape only rewrites
-the labels that actually changed, and an expanded session stays expanded.
+the labels that actually changed.
 
 **The dashboard** is the long look: gauges, sixty days of history, the last
 twenty-four hours, projects, blocks, the token mix, models and effort. Open it
 from the tray, or `cc-cockpit serve --open`. With more than one account it grows
 a tab bar — one per account, plus **All accounts**.
+
+Three cards fold: the official curve, the heatmap and the recent sessions. Each
+viewer's choice is kept in their own browser, and the recent list ships folded —
+it is the one you consult, not the one you watch.
 
 **Settings** opens a real window rather than a submenu: a menu has nowhere to
 type a number, and GNOME's appindicator extension flattens submenus to a single
@@ -215,6 +228,7 @@ the file is written back on start, so new options show up there:
   "limits": { "block_usd": null, "week_usd": null },  // null = automatic
   "tray_metric": "block",        // block | week | today | none
   "tray_show_cost": true,
+  "recent_sessions": 5,          // conversations offered for resuming; 0 turns the list off
   "menu_bar_style": "blocks",    // blocks | shade | fine | dots | squares |
                                  // line | braille | color_blocks | color_dots
   "refresh_seconds": 20,
@@ -299,7 +313,10 @@ and each configured account otherwise.
 - Deduplication by `message.id:requestId`, so resuming a session is not counted
   twice.
 - `sessions.py` validates each pid against `/proc` **and** compares the
-  `starttime`, so a recycled pid is never mistaken for a live session.
+  `starttime`, so a recycled pid is never mistaken for a live session. The
+  recent list comes from the transcripts instead — only what is still on disk
+  can be resumed — and reads the last 64 KB of each, where Claude Code keeps
+  rewriting the generated title and the working directory.
 - Prices live in `pricing.py`: cache writes at 1.25× (5m) and 2× (1h) of input,
   cache reads at 0.1× (0.025× on Fable 5.1). The transcript separates the two
   cache-write TTLs and the calculation uses that split instead of assuming 5m.

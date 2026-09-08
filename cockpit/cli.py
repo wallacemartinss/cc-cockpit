@@ -63,6 +63,18 @@ def report(cfg: dict, s: dict | None = None) -> None:
     else:
         print(f"   {t('cli_none')}")
 
+    # the whole point of this block is the second line: the id lives in the
+    # transcript and nowhere else, so without it a closed conversation is gone
+    recent = s.get("recent") or []
+    if recent:
+        print(f"\n  \033[1m{t('cli_recent')}\033[0m")
+        for x in recent:
+            title = (x["title"] or t("untitled"))[:38]
+            print(f"   · {title:<38} {_money(x['usage']['usd']):>11} "
+                  f"{t('ago', d=_dur(x['ago_s'])):>13}")
+            print(f"     \033[2mcd {_tilde(x['cwd'])} && "
+                  f"claude --resume {x['session_id']}\033[0m")
+
     print(f"\n  \033[1m{t('cli_projects')}\033[0m")
     for p in s["projects"][:8]:
         print(f"   {p['label'][:34]:<34} {_money(p['usd']):>12} {_toks(p['tokens']):>8}  "
