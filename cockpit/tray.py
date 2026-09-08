@@ -303,7 +303,9 @@ class Tray:
             rows.append(Row("row", head, icon.dot(state, 22, pct if pct is not None else 0)))
             rows.append(Row("row", f"{_bar(pct, width, style, state)}   {_money(info['usd'])}"))
             if detail:
-                rows.append(Row("row", "   " + window_tail(info, is_block=info is b)))
+                # flush left, like every other row: the indent set this line
+                # apart from the login line right below it, which never had one
+                rows.append(Row("row", window_tail(info, is_block=info is b)))
         return rows
 
     def _action_rows(self) -> list[Row]:
