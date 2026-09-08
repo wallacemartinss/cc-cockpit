@@ -62,6 +62,7 @@ them. Saving applies right away, without a restart.
 # from the latest release
 sudo apt install ./cc-cockpit_0.2.0_all.deb
 cc-cockpit setup
+nohup cc-cockpit tray >/dev/null 2>&1 &   # tray now, without logging out
 ```
 
 **Arch** — from the [AUR](https://aur.archlinux.org/packages/cc-cockpit):
@@ -69,6 +70,7 @@ cc-cockpit setup
 ```bash
 yay -S cc-cockpit    # or paru, or makepkg -si
 cc-cockpit setup
+nohup cc-cockpit tray >/dev/null 2>&1 &   # tray now, without logging out
 ```
 
 **Any distribution** — pipx, reusing the system GTK bindings:
@@ -77,6 +79,7 @@ cc-cockpit setup
 sudo apt install python3-gi python3-cairo gir1.2-ayatanaappindicator3-0.1  # tray only
 pipx install cc-cockpit --system-site-packages
 cc-cockpit setup
+nohup cc-cockpit tray >/dev/null 2>&1 &   # tray now, without logging out
 ```
 
 `--system-site-packages` is what lets the virtualenv see PyGObject and pycairo.
@@ -87,11 +90,17 @@ Without them the tray is unavailable, and the dashboard and `report` still work.
 ```bash
 git clone https://github.com/wallacemartinss/cc-cockpit
 cd cc-cockpit && ./install.sh
+nohup cc-cockpit tray >/dev/null 2>&1 &   # tray now, without logging out
 ```
 
 `cc-cockpit setup` registers the autostart entry, captures the statusline
 (see below), checks the tray dependencies and runs the first collection.
 `cc-cockpit setup --remove` undoes the autostart entry.
+
+That autostart entry only fires on the next login, so the last line starts the
+tray in the session you are already in — the icon shows up right away, with no
+need to log out. It is the same command on every distribution, and it is only
+needed once: from the next login on, autostart takes care of it.
 
 ```bash
 cc-cockpit                 # tray + dashboard in the background
