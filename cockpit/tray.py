@@ -41,7 +41,7 @@ if _IND_NS == "AyatanaAppIndicator3":
 else:
     from gi.repository import AppIndicator3 as AppIndicator  # noqa: E402
 
-from . import accounts, bars, config, icon, instance, server, stats, terminal  # noqa: E402
+from . import accounts, bars, config, icon, instance, label, server, stats, terminal  # noqa: E402
 from .i18n import duration as _dur  # noqa: E402
 from .i18n import money as _money  # noqa: E402
 from .i18n import t  # noqa: E402
@@ -159,19 +159,10 @@ class Tray:
             "week": face["week"],
             "today": face["today_gauge"],
         }.get(metric)
-        if metric == "none" or src is None:
-            self.ind.set_label("", APP_ID)
-            pct = None
-        else:
-            pct = src.get("pct")
-            bits = []
-            if pct is not None:
-                bits.append(f"{pct:.0f}%")
-            if self.cfg.get("tray_show_cost", True):
-                bits.append(_money(src["usd"]))
-            if len(parts) > 1:
-                bits.append(face["account"]["label"][:8])
-            self.ind.set_label(" · ".join(bits) or "—", "cc-cockpit 000%")
+        pct = None if metric == "none" or src is None else src.get("pct")
+        self.ind.set_label(label.compose(label.format_of(self.cfg), metric, face,
+                                         multi=len(parts) > 1, cfg=self.cfg),
+                           "cc-cockpit 000%")
 
         th = s["thresholds"]
         worst = pct
@@ -536,7 +527,11 @@ class Tray:
             return
         from .preferences import Preferences
 
-        self.prefs = Preferences(on_saved=self._settings_saved)
+        # the label previews use the numbers the panel is showing right now
+        parts = (self.data or {}).get("parts") or ([self.data] if self.data else [])
+        primary = accounts.primary(self.cfg).id
+        face = next((p for p in parts if p["account"]["id"] == primary), parts[0] if parts else None)
+        self.prefs = Preferences(on_saved=self._settings_saved, preview=face)
         self.prefs.show_all()
         self.prefs.present()
 

@@ -23,6 +23,11 @@ DEFAULTS: dict = {
     #   color_blocks | color_dots   (the two that carry the state as colour)
     # "emoji" is the old name for color_blocks and still works.
     "menu_bar_style": "blocks",
+    # the text beside the icon, see cockpit/label.py:
+    #   pct | pct_cost | pct_cost_short | pct_reset | pct_reset_cost_short |
+    #   pct_eta | block_week | reset | cost_short | icon
+    # null = follow tray_show_cost, the older on/off switch it replaces
+    "tray_label": None,
     "tray_show_cost": True,
     # how many past conversations to offer for resuming, in the tray, the
     # dashboard and the report. 0 turns the list off.
