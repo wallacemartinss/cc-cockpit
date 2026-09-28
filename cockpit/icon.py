@@ -66,8 +66,11 @@ def render(pct: float | None, state: str, seq: int) -> str:
 
     # the loose file covers the old resolver; the hicolor/ copy covers GTK4,
     # which no longer looks for icons outside a theme structure
-    surf.write_to_png(str(ICON_DIR / f"{name}.png"))
-    surf.write_to_png(str(themed / f"{name}.png"))
+    # written aside and renamed, so the shell never reads a half-written PNG
+    for dest in (ICON_DIR / f"{name}.png", themed / f"{name}.png"):
+        tmp = dest.with_suffix(".tmp")
+        surf.write_to_png(str(tmp))
+        tmp.replace(dest)
     return name
 
 

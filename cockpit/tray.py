@@ -97,6 +97,8 @@ class Tray:
         self.prefs = None
         self.timer = None
         self.seq = 0
+        self._shown_icon = None
+        self._shown_label = None
         self.data: dict | None = None
         self.ind = AppIndicator.Indicator.new(
             APP_ID, "utilities-system-monitor",
@@ -137,7 +139,7 @@ class Tray:
     def _apply(self, data: dict) -> bool:
         self.data = data
         if "error" in data:
-            self.ind.set_label("cc ⚠", APP_ID)
+            self._label("cc ⚠", APP_ID)
         else:
             self._paint(data)
         self._build_menu(data)
@@ -160,7 +162,7 @@ class Tray:
             "today": face["today_gauge"],
         }.get(metric)
         if metric == "none" or src is None:
-            self.ind.set_label("", APP_ID)
+            self._label("", APP_ID)
             pct = None
         else:
             pct = src.get("pct")
@@ -171,7 +173,7 @@ class Tray:
                 bits.append(_money(src["usd"]))
             if len(parts) > 1:
                 bits.append(face["account"]["label"][:8])
-            self.ind.set_label(" · ".join(bits) or "—", "cc-cockpit 000%")
+            self._label(" · ".join(bits) or "—", "cc-cockpit 000%")
 
         th = s["thresholds"]
         worst = pct
@@ -180,9 +182,23 @@ class Tray:
             if other is not None and (worst is None or other > worst):
                 worst = other
         state = icon.state_for(worst, th["warn"], th["critical"])
+        # Every icon swap is loaded by the AppIndicator extension inside
+        # gnome-shell, on the thread that draws the screen, and over a long
+        # session those swaps pile up in its main loop. Only swap when the
+        # picture actually changes (the arc moves in whole percent).
+        key = (None if pct is None else round(pct), state)
+        if key == self._shown_icon:
+            return
+        self._shown_icon = key
         self.seq += 1
         # the arc still shows the account on the label; only the colour escalates
         self.ind.set_icon_full(icon.render(pct, state, self.seq), APP_ID)
+
+    def _label(self, text: str, guide: str) -> None:
+        # set_label is a D-Bus round trip to the shell even when nothing changed.
+        if (text, guide) != self._shown_label:
+            self._shown_label = (text, guide)
+            self.ind.set_label(text, guide)
 
     # ---------- menu ----------
     # Composing the menu and rendering it are kept apart on purpose. The menu is
