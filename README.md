@@ -8,8 +8,12 @@ A Claude Code usage panel for Linux: a tray indicator with a consumption ring,
 a local dashboard and a terminal summary.
 
 Everything is read from what Claude Code already writes under `~/.claude` — or
-under each account's directory, if you run more than one. It makes no network
-calls and sends nothing anywhere.
+under each account's directory, if you run more than one. It sends nothing
+anywhere, and makes a single kind of network call, only when you ask for it:
+the **Fetch from Banco Central** button beside the dollar rate in Settings →
+Plan reads the PTAX rate from Banco Central do Brasil's open API. Nothing is
+fetched at start-up or on a timer. The address sits under *Advanced*, with a
+*Default* button that restores the one shipped with the release.
 
 One exception is worth stating plainly: to tell you when your login expires it
 opens `.credentials.json` and reads exactly two fields — the refresh-token

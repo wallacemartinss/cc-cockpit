@@ -33,6 +33,9 @@ DEFAULTS: dict = {
     "plan_name": "",
     # optional rate to show a local-currency figure next to USD
     "local_currency": None,   # e.g. {"code": "BRL", "symbol": "R$", "rate": 5.4}
+    # where the rate button in Settings asks for the dollar, see cockpit/rate.py.
+    # null = the address shipped with this release (Banco Central, PTAX)
+    "rate_url": None,
     "dashboard_port": 8765,
     "warn_pct": 70,
     "critical_pct": 90,
