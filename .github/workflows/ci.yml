@@ -17,17 +17,21 @@ jobs:
       - name: Compile every module
         run: python -m compileall -q cockpit
 
+      - name: Unit tests
+        run: python -m unittest discover -s tests -t . -v
+
       - name: Build wheel and sdist
         run: |
           python -m pip install --quiet build
           python -m build
 
-      - name: The dashboard must ship inside the wheel
+      - name: The dashboard and the icon must ship inside the wheel
         run: |
           python - <<'PY'
           import glob, zipfile
           names = zipfile.ZipFile(sorted(glob.glob("dist/*.whl"))[-1]).namelist()
           assert "cockpit/web/index.html" in names, names
+          assert "cockpit/assets/cc-cockpit.svg" in names, names
           print("ok:", len(names), "entries")
           PY
 

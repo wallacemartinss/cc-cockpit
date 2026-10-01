@@ -15,10 +15,13 @@ install -d "$STAGE/DEBIAN" \
            "$STAGE/usr/lib/python3/dist-packages/cockpit" \
            "$STAGE/usr/bin" \
            "$STAGE/usr/share/doc/cc-cockpit" \
-           "$STAGE/usr/share/applications"
+           "$STAGE/usr/share/applications" \
+           "$STAGE/usr/share/icons/hicolor/scalable/apps"
 
 cp -r "$ROOT/cockpit/." "$STAGE/usr/lib/python3/dist-packages/cockpit/"
 find "$STAGE/usr/lib/python3/dist-packages/cockpit" -name '__pycache__' -type d -exec rm -rf {} +
+# the theme copy is what the menu and the autostart entry resolve Icon= against
+cp "$ROOT/cockpit/assets/cc-cockpit.svg" "$STAGE/usr/share/icons/hicolor/scalable/apps/"
 
 cat > "$STAGE/usr/bin/cc-cockpit" <<'PY'
 #!/usr/bin/python3
@@ -39,7 +42,7 @@ Type=Application
 Name=cc-cockpit
 Comment=Claude Code usage in the tray
 Exec=/usr/bin/cc-cockpit tray
-Icon=utilities-system-monitor
+Icon=cc-cockpit
 Terminal=false
 Categories=System;Monitor;
 DESKTOP
@@ -50,7 +53,7 @@ Version: $VERSION
 Section: utils
 Priority: optional
 Architecture: all
-Depends: python3 (>= 3.9), python3-gi, python3-cairo, gir1.2-ayatanaappindicator3-0.1
+Depends: python3 (>= 3.9), python3-gi, python3-gi-cairo, python3-cairo, gir1.2-gtk-3.0, gir1.2-ayatanaappindicator3-0.1
 Suggests: gnome-shell-extension-appindicator, xfce4-statusnotifier-plugin
 Maintainer: Wallace Martins da Silva <wallacemartinss@gmail.com>
 Homepage: https://github.com/wallacemartinss/cc-cockpit

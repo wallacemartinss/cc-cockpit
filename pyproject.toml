@@ -45,4 +45,4 @@ packages = ["cockpit"]
 version = { attr = "cockpit.__version__" }
 
 [tool.setuptools.package-data]
-cockpit = ["web/*.html"]
+cockpit = ["web/*.html", "assets/*.svg"]

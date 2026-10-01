@@ -92,13 +92,20 @@ def report(cfg: dict, s: dict | None = None) -> None:
 
 def _setup(args) -> int:
     if args.remove:
-        removed = desktop.disable_autostart()
-        print(f"autostart: {'removed' if removed else 'was not registered'}")
+        was = desktop.disable_autostart()
+        print(f"autostart: off{'' if was else ' (was not enabled)'}")
         print("statusline: remove the statusLine entry from ~/.claude/settings.json to undo it")
         return 0
 
-    path = desktop.enable_autostart()
-    print(f"autostart: {path}")
+    # setup runs again on every reinstall and upgrade, so an explicit "no" from
+    # --autostart off or the Settings switch has to survive it
+    if desktop.autostart_declined():
+        print("autostart: off (kept; cc-cockpit --autostart on to enable)")
+    else:
+        print(f"autostart: on - {_tilde(desktop.enable_autostart())}")
+    icon = desktop.install_icon()
+    if icon:
+        print(f"icon: {_tilde(icon)}")
 
     if not args.no_statusline:
         from . import statusline as sl
@@ -344,6 +351,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="cc-cockpit", description="Claude Code usage panel")
     parser.add_argument("--version", action="version", version=f"cc-cockpit {__version__}")
     parser.add_argument("--lang", choices=i18n.SUPPORTED, help="override the interface language")
+    parser.add_argument("--autostart", choices=("on", "off", "status"),
+                        help="start the tray at graphical login for this user, then exit")
     parser.add_argument("--account", metavar="ID",
                         help="which Claude Code account to act on ('all' to combine them)")
     sub = parser.add_subparsers(dest="cmd")
@@ -374,7 +383,7 @@ def main(argv: list[str] | None = None) -> int:
         "setup", help="register autostart and the statusline capture")
     setup_cmd.add_argument("--no-statusline", action="store_true",
                            help="skip touching ~/.claude/settings.json")
-    setup_cmd.add_argument("--remove", action="store_true", help="undo the autostart entry")
+    setup_cmd.add_argument("--remove", action="store_true", help="turn the autostart entry off")
     line = sub.add_parser("statusline",
                           help="capture Claude Code's statusline payload (official numbers)")
     line.add_argument("--chain", help="run another statusline command and print its output")
@@ -388,6 +397,21 @@ def main(argv: list[str] | None = None) -> int:
     sync.add_argument("--week-reset", metavar="TIME", help="e.g. '1h15'")
     sync.add_argument("--reset", action="store_true", help="drop anchors and samples")
     args = parser.parse_args(argv)
+
+    if args.autostart:
+        # a preference switch, not a run: no config, no collection, no tray
+        if args.cmd:
+            parser.error("--autostart takes no subcommand")
+        try:
+            if args.autostart == "on":
+                desktop.enable_autostart()
+            elif args.autostart == "off":
+                desktop.disable_autostart()
+        except (OSError, ValueError) as exc:
+            print(f"autostart: {exc}", file=sys.stderr)
+            return 1
+        print(f"autostart: {'on' if desktop.autostart_enabled() else 'off'}")
+        return 0
 
     cfg = config.ensure()
     if args.lang:

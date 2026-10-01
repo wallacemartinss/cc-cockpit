@@ -10,23 +10,26 @@ when the tray is missing has to follow the desktop actually in use.
 """
 from __future__ import annotations
 
+import configparser
 import os
 import shutil
 import sys
+from importlib import resources
 from pathlib import Path
 
-AUTOSTART_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "autostart"
-DESKTOP_FILE = AUTOSTART_DIR / "cc-cockpit.desktop"
+APP_ID = "cc-cockpit"
 
 TEMPLATE = """[Desktop Entry]
 Type=Application
 Name=cc-cockpit
 Comment=Claude Code usage in the tray
 Exec={exec_line}
-Icon=utilities-system-monitor
+TryExec={try_exec}
+Icon=cc-cockpit
 Terminal=false
 Categories=System;Monitor;
-X-GNOME-Autostart-enabled=true
+Hidden={hidden}
+X-GNOME-Autostart-enabled={enabled}
 """
 
 # The panel has to be up before the indicator registers, and only GNOME honours
@@ -35,26 +38,131 @@ X-GNOME-Autostart-enabled=true
 AUTOSTART_DELAY = 8
 
 
-def executable() -> str:
-    """The installed entry point, or the module when run from a checkout."""
+def _xdg(var: str, default: str) -> Path:
+    # an empty variable means unset, per the spec - not the current directory
+    return Path(os.environ.get(var) or Path.home() / default)
+
+
+def autostart_file() -> Path:
+    """Resolved per call, so XDG_CONFIG_HOME is read when it is needed."""
+    return _xdg("XDG_CONFIG_HOME", ".config") / "autostart" / f"{APP_ID}.desktop"
+
+
+def _entries() -> list[Path]:
+    """The user's entry first: by the XDG rule it shadows the system ones."""
+    dirs = (os.environ.get("XDG_CONFIG_DIRS") or "/etc/xdg").split(":")
+    return [autostart_file()] + [Path(d) / "autostart" / f"{APP_ID}.desktop" for d in dirs if d]
+
+
+def _read(path: Path):
+    parser = configparser.ConfigParser(interpolation=None)
+    try:
+        parser.read(path, encoding="utf-8")
+        return parser["Desktop Entry"]
+    except (configparser.Error, KeyError, UnicodeDecodeError):
+        return None
+
+
+def autostart_enabled() -> bool:
+    """Whether the session manager will start the tray at the next login."""
+    for path in _entries():
+        if not path.exists():
+            continue
+        entry = _read(path)
+        if entry is None:
+            return False
+        try:
+            return (not entry.getboolean("Hidden", fallback=False)
+                    and entry.getboolean("X-GNOME-Autostart-enabled", fallback=True))
+        except ValueError:
+            return False
+    return False
+
+
+def autostart_declined() -> bool:
+    """The user turned it off on purpose, so `setup` must not turn it back on."""
+    path = autostart_file()
+    return path.exists() and not autostart_enabled()
+
+
+def executable() -> list[str]:
+    """The installed entry point, or the module when run from a checkout.
+
+    The entry point this process was started through comes first: with a .deb
+    in /usr/bin and an old install.sh launcher in ~/.local/bin, PATH finds the
+    launcher, and `/usr/bin/cc-cockpit --autostart on` has to mean /usr/bin.
+    """
+    invoked = Path(sys.argv[0]) if sys.argv and sys.argv[0] else None
+    if (invoked and invoked.is_absolute() and invoked.name == APP_ID
+            and os.access(invoked, os.X_OK)):
+        return [str(invoked)]
     found = shutil.which("cc-cockpit")
     if found:
-        return found
-    return f"{sys.executable} -m cockpit"
+        return [found]
+    return [sys.executable, "-m", "cockpit"]
+
+
+def _exec_quote(program: str) -> str:
+    """Quotes a path for Exec=. Two escaping layers apply: the Exec rules
+    (backslash, quote, backtick, dollar inside quotes; % doubled) and then the
+    string rules of the file itself, which double every backslash again."""
+    if any(c in program for c in "\n\r"):
+        raise ValueError(f"cannot write a desktop entry for {program!r}")
+    quoted = program.replace("\\", "\\\\")
+    for char in ('"', "`", "$"):
+        quoted = quoted.replace(char, "\\" + char)
+    return '"' + quoted.replace("\\", "\\\\").replace("%", "%%") + '"'
+
+
+def _write_autostart(enabled: bool) -> Path:
+    program, *rest = executable()
+    exec_line = " ".join([_exec_quote(program), *rest, "tray", "--delay", str(AUTOSTART_DELAY)])
+    path = autostart_file()
+    content = TEMPLATE.format(
+        exec_line=exec_line,
+        # TryExec keeps a stale entry quiet once the package is removed
+        try_exec=program.replace("\\", "\\\\"),
+        hidden=str(not enabled).lower(),
+        enabled=str(enabled).lower())
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    return path
 
 
 def enable_autostart() -> Path:
-    AUTOSTART_DIR.mkdir(parents=True, exist_ok=True)
-    DESKTOP_FILE.write_text(TEMPLATE.format(
-        exec_line=f"{executable()} tray --delay {AUTOSTART_DELAY}"))
-    return DESKTOP_FILE
+    return _write_autostart(True)
 
 
 def disable_autostart() -> bool:
-    if DESKTOP_FILE.exists():
-        DESKTOP_FILE.unlink()
-        return True
-    return False
+    """Turns it off and says whether it was on.
+
+    The entry is rewritten with Hidden=true rather than deleted: that is how
+    the XDG spec lets a user switch off an entry installed under /etc/xdg, and
+    it is what tells a later `setup` that the answer was no - which is why it
+    is written even when nothing was registered yet.
+    """
+    was = autostart_enabled()
+    _write_autostart(False)
+    return was
+
+
+SYSTEM_ICON_DIRS = (Path("/usr/share/icons"), Path("/usr/local/share/icons"))
+ICON_SUBPATH = Path("hicolor/scalable/apps") / f"{APP_ID}.svg"
+
+
+def install_icon() -> Path | None:
+    """Copies the app icon into the user's theme, for pip and pipx installs.
+
+    The .deb and the AUR package put it under /usr/share already; there is
+    nothing to add then. Returns where it was written, or None.
+    """
+    if any((d / ICON_SUBPATH).exists() for d in SYSTEM_ICON_DIRS):
+        return None
+    target = _xdg("XDG_DATA_HOME", ".local/share") / "icons" / ICON_SUBPATH
+    source = resources.files("cockpit").joinpath("assets", f"{APP_ID}.svg").read_bytes()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(source)
+    return target
 
 
 # Names that identify a desktop in XDG_CURRENT_DESKTOP. The variable often

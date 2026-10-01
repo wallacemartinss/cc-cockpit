@@ -115,8 +115,29 @@ nohup cc-cockpit tray >/dev/null 2>&1 &   # tray now, without logging out
 ```
 
 `cc-cockpit setup` registers the autostart entry, captures the statusline
-(see below), checks the tray dependencies and runs the first collection.
-`cc-cockpit setup --remove` undoes the autostart entry.
+(see below), checks the tray dependencies and runs the first collection. On a
+pip or pipx install it also copies the app icon into
+`~/.local/share/icons`; the `.deb` and the AUR package ship it themselves.
+`cc-cockpit setup --remove` turns the autostart entry off.
+
+Autostart can be switched on and off at any time, for the current user and
+without sudo — from **Settings → General → Start at login**, or:
+
+```bash
+cc-cockpit --autostart on       # start the tray at the next graphical login
+cc-cockpit --autostart off
+cc-cockpit --autostart status   # the preference, not whether a tray is running
+```
+
+The flag only changes the preference and exits. Turning it off keeps the entry
+in `~/.config/autostart/` with `Hidden=true` instead of deleting it, so the
+answer survives upgrades: `setup` enables autostart on a fresh install, but
+never over an explicit off. Turning it off does not close a tray already
+running. The entry carries `TryExec`, so it stays quiet once the package is
+removed. It runs the command you invoked when given as a full path, so after
+moving from `install.sh` to the `.deb`, `/usr/bin/cc-cockpit --autostart on`
+points autostart at the package even with the old launcher still in
+`~/.local/bin`.
 
 That autostart entry only fires on the next login, so the last line starts the
 tray in the session you are already in — the icon shows up right away, with no

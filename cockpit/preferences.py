@@ -17,7 +17,7 @@ import gi
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk  # noqa: E402
 
-from . import accounts, bars, config  # noqa: E402
+from . import accounts, bars, config, desktop  # noqa: E402
 from .accounts import DATA_DIR  # noqa: E402
 from .i18n import t  # noqa: E402
 
@@ -86,6 +86,12 @@ class Preferences(Gtk.Window):
                                           suffix=t("seconds"))
         self.port = self._spin(general, 6, t("dashboard_port"),
                                self.cfg.get("dashboard_port", 8765), 1024, 65535)
+        # not a config key: the autostart entry itself is the state, so the
+        # switch and `cc-cockpit --autostart` can never disagree
+        self.autostart_was = desktop.autostart_enabled()
+        self.autostart = Gtk.Switch(halign=Gtk.Align.START)
+        self.autostart.set_active(self.autostart_was)
+        self._attach(general, 7, t("start_at_login"), self.autostart)
 
         # The name is editable here; the id is not. An id names accounts/<id>/,
         # which holds months Claude Code has already pruned, so changing it has
@@ -354,7 +360,28 @@ class Preferences(Gtk.Window):
         config.save(cfg)
         if self.on_saved:
             self.on_saved(cfg)
+        if not self._apply_autostart():
+            return                             # keep the window open on the error
         self.close()
+
+    def _apply_autostart(self) -> bool:
+        wanted = self.autostart.get_active()
+        if wanted == self.autostart_was:
+            return True
+        try:
+            desktop.enable_autostart() if wanted else desktop.disable_autostart()
+        except (OSError, ValueError) as exc:
+            self.autostart.set_active(desktop.autostart_enabled())
+            dialog = Gtk.MessageDialog(transient_for=self, modal=True,
+                                       message_type=Gtk.MessageType.ERROR,
+                                       buttons=Gtk.ButtonsType.CLOSE,
+                                       text=t("autostart_error"))
+            dialog.format_secondary_text(str(exc))
+            dialog.run()
+            dialog.destroy()
+            return False
+        self.autostart_was = wanted
+        return True
 
     def _save_aliases(self, cfg: dict) -> None:
         """Writes the names back, materialising an implicit account if renamed.
