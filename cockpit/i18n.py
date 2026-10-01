@@ -17,6 +17,11 @@ DEFAULT = "en"
 # region kept when the OS provides one, so numbers format the local way
 _TAGS = {"en": "en-US", "pt": "pt-BR", "es": "es-ES"}
 
+# The local currency Settings offers for each language, until one is saved.
+# "pt" is Brazilian throughout (see _TAGS), so it is the real. No rate: the
+# local figure stays off until someone types one, rather than convert on a guess.
+_CURRENCIES = {"pt": {"code": "BRL", "symbol": "R$"}}
+
 CATALOG: dict[str, dict[str, str]] = {
     "en": {
         # tray + cli
@@ -137,9 +142,20 @@ CATALOG: dict[str, dict[str, str]] = {
         "block_limit": "5h block (USD)",
         "week_limit": "Week (USD)",
         "plan_title": "Plan",
-        "plan_name_label": "Name",
         "plan_cost": "Monthly cost (USD)",
-        "plan_hint": "Used to show how many times the plan paid for itself.",
+        "plan_cost_override": "Adjust the cost by hand",
+        "plan_cost_hint": "Leave empty to use the list price of the plans above. A value here stands for the whole monthly bill.",
+        "plan_no_login": "No login found in {dir}.",
+        "plan_who": "Account",
+        "plan_org": "Organisation",
+        "plan_personal": "Personal",
+        "plan_since": "Subscriber since",
+        "plan_extra": "Extra usage",
+        "plan_login": "Login valid until",
+        "plan_from_credentials": "Read from the login token - it may lag behind a plan change.",
+        "per_month": "/month",
+        "yes": "enabled",
+        "no": "disabled",
         "currency_title": "Local currency",
         "currency_symbol": "Symbol",
         "currency_code": "Code",
@@ -290,9 +306,20 @@ CATALOG: dict[str, dict[str, str]] = {
         "block_limit": "Bloco de 5h (USD)",
         "week_limit": "Semana (USD)",
         "plan_title": "Plano",
-        "plan_name_label": "Nome",
         "plan_cost": "Custo mensal (USD)",
-        "plan_hint": "Serve para mostrar quantas vezes o plano se pagou.",
+        "plan_cost_override": "Ajustar o custo manualmente",
+        "plan_cost_hint": "Deixe vazio para usar o preço de tabela dos planos acima. Um valor aqui vale pela fatura mensal inteira.",
+        "plan_no_login": "Nenhum login encontrado em {dir}.",
+        "plan_who": "Conta",
+        "plan_org": "Organização",
+        "plan_personal": "Pessoal",
+        "plan_since": "Assinante desde",
+        "plan_extra": "Uso extra",
+        "plan_login": "Login válido até",
+        "plan_from_credentials": "Lido do token de login - pode estar desatualizado após uma troca de plano.",
+        "per_month": "/mês",
+        "yes": "habilitado",
+        "no": "desabilitado",
         "currency_title": "Moeda local",
         "currency_symbol": "Símbolo",
         "currency_code": "Código",
@@ -443,9 +470,20 @@ CATALOG: dict[str, dict[str, str]] = {
         "block_limit": "Bloque de 5h (USD)",
         "week_limit": "Semana (USD)",
         "plan_title": "Plan",
-        "plan_name_label": "Nombre",
         "plan_cost": "Costo mensual (USD)",
-        "plan_hint": "Sirve para mostrar cuántas veces se pagó el plan.",
+        "plan_cost_override": "Ajustar el costo manualmente",
+        "plan_cost_hint": "Déjalo vacío para usar el precio de lista de los planes de arriba. Un valor aquí vale por la factura mensual completa.",
+        "plan_no_login": "No se encontró ningún inicio de sesión en {dir}.",
+        "plan_who": "Cuenta",
+        "plan_org": "Organización",
+        "plan_personal": "Personal",
+        "plan_since": "Suscriptor desde",
+        "plan_extra": "Uso extra",
+        "plan_login": "Sesión válida hasta",
+        "plan_from_credentials": "Leído del token de sesión - puede ir atrasado tras un cambio de plan.",
+        "per_month": "/mes",
+        "yes": "habilitado",
+        "no": "deshabilitado",
         "currency_title": "Moneda local",
         "currency_symbol": "Símbolo",
         "currency_code": "Código",
@@ -510,6 +548,10 @@ def use(language: str | None = None) -> str:
     else:
         _lang, _tag = detect()
     return _lang
+
+
+def default_currency() -> dict:
+    return dict(_CURRENCIES.get(_lang, {}))
 
 
 def language() -> str:

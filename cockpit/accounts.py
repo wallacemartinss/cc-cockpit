@@ -238,7 +238,10 @@ def identity(claude_dir: Path) -> dict:
         return {}
     return {k: account.get(k) for k in
             ("displayName", "fullName", "organizationName", "organizationType",
-             "organizationRole", "emailAddress")}
+             "organizationRole", "emailAddress",
+             # the plan, for the Plan tab - see auth.account_plan
+             "organizationRateLimitTier", "userRateLimitTier", "billingType",
+             "subscriptionCreatedAt", "hasExtraUsageEnabled")}
 
 
 def suggest_label(claude_dir: Path) -> str:

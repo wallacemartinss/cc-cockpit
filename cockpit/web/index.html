@@ -185,6 +185,15 @@ const money = v => new Intl.NumberFormat(LOCALE,
 const local = v => LOCAL
   ? ' · ' + LOCAL.symbol + ' ' + (v*LOCAL.rate).toLocaleString(LOCALE,{maximumFractionDigits:0})
   : '';
+// The month is shown either way - with a known plan it follows the return, so
+// the local currency is never pushed off the page by the plan being detected
+function planLine(plan, monthUsd){
+  const month = `<b>${money(monthUsd)}</b>${local(monthUsd)}`;
+  return plan.monthly_usd
+    ? `${esc(t('plan_roi', {name: plan.name||'—',
+        roi: (plan.roi||0).toLocaleString(LOCALE, {maximumFractionDigits: 1})}))} · ${month}`
+    : `${esc(t('month_equivalent'))} ${month}`;
+}
 function toks(n){
   const f = (x,d) => x.toLocaleString(LOCALE,{minimumFractionDigits:d,maximumFractionDigits:d});
   if(n>=1e9) return f(n/1e9,2)+'B';
@@ -432,9 +441,7 @@ async function tick(){
   const th = {warn:s.thresholds.warn, critical:s.thresholds.critical};
   const b = s.block, w = s.week, tt = s.totals;
 
-  $('#plan').innerHTML = s.plan.monthly_usd
-    ? esc(t('plan_roi', {name: s.plan.name||'—', roi: s.plan.roi||0}))
-    : `${esc(t('month_equivalent'))} <b>${money(tt.month.usd)}</b>${local(tt.month.usd)}`;
+  $('#plan').innerHTML = planLine(s.plan, tt.month.usd);
   $('#live').textContent = t('sessions_open', {n: s.sessions.length});
 
   // the login is per account; the combined tab carries one per account instead

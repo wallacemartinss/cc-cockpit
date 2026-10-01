@@ -356,9 +356,20 @@ def summary(events: list[Event] | None = None, cfg: dict | None = None,
         item["usage"] = b.as_dict() if b else Bucket().as_dict()
         item["project"] = _label(item["cwd"])
 
-    plan = cfg.get("plan_monthly_usd")
+    # the price comes from the login unless the user set one by hand; the name
+    # typed before detection existed is only kept for an account without one
+    detected = auth.account_plan(acct) or {}
+    manual = cfg.get("plan_monthly_usd")
+    plan = manual if manual is not None else detected.get("monthly_usd")
     value = totals["month"].usd
     roi = round(value / plan, 1) if plan else None
+    plan_info = {
+        "monthly_usd": plan,
+        "name": detected.get("name") or cfg.get("plan_name") or "",
+        "source": "manual" if manual is not None else (detected.get("source") if plan else None),
+        "value_this_month": round(value, 2),
+        "roi": roi,
+    }
 
     return {
         "generated_at": now,
@@ -394,7 +405,7 @@ def summary(events: list[Event] | None = None, cfg: dict | None = None,
         "sessions": live,
         "recent": recent,
         "recent_limit": recent_limit,
-        "plan": {"monthly_usd": plan, "name": cfg.get("plan_name") or "", "value_this_month": round(value, 2), "roi": roi},
+        "plan": plan_info,
         "local_currency": cfg.get("local_currency"),
         "i18n": {"language": i18n.language(), "tag": i18n.tag(), "catalog": i18n.catalog()},
         "thresholds": {"warn": cfg.get("warn_pct", 70), "critical": cfg.get("critical_pct", 90)},
@@ -457,7 +468,25 @@ def combined(cfg: dict | None = None, parts: list[dict] | None = None) -> dict:
     out["recent"] = sorted((r for p in parts for r in p.get("recent") or []),
                            key=lambda r: -r["last_at"])[:limit]
     out["recent_limit"] = limit
+    out["plan"] = combined_plan(parts, manual=cfg.get("plan_monthly_usd"),
+                                month_usd=out["totals"]["month"]["usd"])
     return out
+
+
+def combined_plan(parts: list[dict], manual, month_usd: float) -> dict:
+    """Two subscriptions cost two prices: the combined view adds them up.
+
+    A cost typed by hand stands for the whole bill and replaces the sum.
+    """
+    priced = [p["plan"] for p in parts if (p.get("plan") or {}).get("monthly_usd")]
+    total = manual if manual is not None else (sum(p["monthly_usd"] for p in priced) or None)
+    return {
+        "monthly_usd": total,
+        "name": " + ".join(p["name"] for p in priced if p.get("name")),
+        "source": "manual" if manual is not None else ("profile" if total else None),
+        "value_this_month": round(month_usd, 2),
+        "roi": round(month_usd / total, 1) if total else None,
+    }
 
 
 def t_all() -> str:

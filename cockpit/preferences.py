@@ -10,6 +10,7 @@ simply unreachable on a short display with no way to scroll to them.
 from __future__ import annotations
 
 import subprocess
+import time
 from pathlib import Path
 
 import gi
@@ -17,9 +18,9 @@ import gi
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk  # noqa: E402
 
-from . import accounts, bars, config  # noqa: E402
+from . import accounts, auth, bars, config  # noqa: E402
 from .accounts import DATA_DIR  # noqa: E402
-from .i18n import t  # noqa: E402
+from .i18n import default_currency, t  # noqa: E402
 
 SPACING = 8
 
@@ -27,6 +28,10 @@ SPACING = 8
 def _tilde(path) -> str:
     text, home = str(path), str(Path.home())
     return "~" + text[len(home):] if text.startswith(home) else text
+
+
+def _usd(value: float) -> str:
+    return f"US$ {value:g}"
 
 
 def _number(value) -> str:
@@ -106,13 +111,16 @@ class Preferences(Gtk.Window):
         self.week_usd = self._entry(limits, 1, t("week_limit"),
                                     _number((self.cfg.get("limits") or {}).get("week_usd")))
 
+        # read, never typed: each login says who it is and what it pays. Only
+        # the cost can be overridden, for a bill that differs from list price
         plan_page = self._page(t("tab_plan"))
-        plan = self._section(plan_page, t("plan_title"), hint=t("plan_hint"))
-        self.plan_name = self._entry(plan, 0, t("plan_name_label"), self.cfg.get("plan_name") or "")
-        self.plan_cost = self._entry(plan, 1, t("plan_cost"),
+        for account in accounts.listed(self.cfg):
+            self._account_plan(plan_page, account)
+        plan = self._section(plan_page, t("plan_cost_override"), hint=t("plan_cost_hint"))
+        self.plan_cost = self._entry(plan, 0, t("plan_cost"),
                                      _number(self.cfg.get("plan_monthly_usd")))
 
-        currency = self.cfg.get("local_currency") or {}
+        currency = self.cfg.get("local_currency") or default_currency()
         money = self._section(plan_page, t("currency_title"))
         self.currency_code = self._entry(money, 0, t("currency_code"), currency.get("code", ""))
         self.currency_symbol = self._entry(money, 1, t("currency_symbol"), currency.get("symbol", ""))
@@ -315,6 +323,38 @@ class Preferences(Gtk.Window):
             self._attach(grid, row, label, spin)
         return spin
 
+    def _account_plan(self, page: Gtk.Box, account) -> None:
+        """One read-only block per account: who is logged in and on which plan."""
+        plan = auth.account_plan(account)
+        grid = self._section(page, account.title,
+                             hint="" if plan else t("plan_no_login", dir=_tilde(account.claude_dir)))
+        if not plan:
+            return
+        price = plan["monthly_usd"]
+        rows = [
+            (t("plan_title"), plan["name"] + (f" · {_usd(price)}{t('per_month')}" if price else "")),
+            (t("plan_who"), " · ".join(x for x in (plan["full_name"], plan["email"]) if x)),
+            # a personal organisation is named after the email, so say what it is
+            (t("plan_org"), " · ".join(x for x in (plan["organization"] or t("plan_personal"),
+                                                   plan["role"]) if x)),
+            (t("plan_since"), plan["subscribed_since"]),
+            (t("plan_extra"), None if plan["extra_usage"] is None
+             else t("yes") if plan["extra_usage"] else t("no")),
+        ]
+        login = auth.status(account)
+        if login:
+            rows.append((t("plan_login"), time.strftime("%Y-%m-%d", time.localtime(login["expires_at"]))))
+        row = 0
+        for label, value in rows:
+            if not value:
+                continue
+            text = Gtk.Label(label=value, halign=Gtk.Align.START, xalign=0, selectable=True, wrap=True)
+            self._attach(grid, row, label, text)
+            row += 1
+        if plan["source"] == "credentials":
+            self._attach(grid, row, "", Gtk.Label(label=t("plan_from_credentials"),
+                                                  halign=Gtk.Align.START, xalign=0, wrap=True))
+
     def _entry(self, grid: Gtk.Grid, row: int, label: str, value: str) -> Gtk.Entry:
         entry = Gtk.Entry(text=value)
         self._attach(grid, row, label, entry)
@@ -334,7 +374,6 @@ class Preferences(Gtk.Window):
             "block_usd": _parse_number(self.block_usd.get_text()),
             "week_usd": _parse_number(self.week_usd.get_text()),
         }
-        cfg["plan_name"] = self.plan_name.get_text().strip()
         cfg["plan_monthly_usd"] = _parse_number(self.plan_cost.get_text())
 
         rate = _parse_number(self.currency_rate.get_text())
