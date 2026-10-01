@@ -150,10 +150,16 @@ def is_multi(cfg: dict | None = None) -> bool:
     return len(listed(cfg)) > 1
 
 
+# Things only Claude Code itself writes: history, a login, its own state. A
+# settings.json is deliberately not one of them - tools that name their folder
+# after Claude keep one too (the claude-mem plugin's ~/.claude-mem has its own
+# settings.json and a database), and offering such a folder as an account put
+# an empty tab and a dead picker in front of the user.
+HOME_MARKERS = ("projects", "sessions", ".claude.json", ".credentials.json")
+
+
 def looks_like_claude_home(path: Path) -> bool:
-    return path.is_dir() and any((path / n).exists()
-                                 for n in ("projects", "sessions", ".claude.json",
-                                           "settings.json", ".credentials.json"))
+    return path.is_dir() and any((path / n).exists() for n in HOME_MARKERS)
 
 
 def running_config_dirs() -> list[Path]:
